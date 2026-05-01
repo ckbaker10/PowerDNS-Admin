@@ -8,11 +8,13 @@ if [ -z ${PDNS_PORT+x} ]; then
     WEB_PORT=8081
 fi
 
-# Import schema structure
+# Always recreate a fresh database from the SQL schema so that every
+# container start (including restarts of a pre-existing container)
+# begins with a clean slate. We keep pdns.sql in place so it is
+# available for subsequent restarts.
 if [ -e "/data/pdns.sql" ]; then
     rm -f /data/pdns.db
-    cat /data/pdns.sql | sqlite3 /data/pdns.db
-    rm -f /data/pdns.sql
+    sqlite3 /data/pdns.db < /data/pdns.sql
     echo "Imported schema structure"
 fi
 

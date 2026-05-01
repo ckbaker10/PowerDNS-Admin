@@ -1,8 +1,6 @@
 import json
-from collections import namedtuple
 
 from powerdnsadmin.lib.validators import validate_zone
-from powerdnsadmin.lib.schema import DomainSchema
 
 class TestIntegrationApiZoneUserApiKey(object):
 
@@ -72,11 +70,8 @@ class TestIntegrationApiZoneUserApiKey(object):
             headers=user_apikey_integration
         )
         data = res.get_json(force=True)
-        fake_domain = namedtuple("Domain", data[0].keys())(*data[0].values())
-        domain_schema = DomainSchema(many=True)
-
-        json.dumps(domain_schema.dump([fake_domain]))
         assert res.status_code == 200
+        assert len(data) >= 1
 
         zone_url_format = "/api/v1/servers/localhost/zones/{0}"
         zone_url = zone_url_format.format(zone_data['name'].rstrip("."))

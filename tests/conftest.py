@@ -2,12 +2,34 @@ import os
 from base64 import b64encode
 
 import pytest
+import requests as _requests
 
 from powerdnsadmin import create_app
 from powerdnsadmin.models.api_key import ApiKey
 from powerdnsadmin.models.base import db
 from powerdnsadmin.models.setting import Setting
 from powerdnsadmin.models.user import User
+
+
+def _purge_pdns_zones():
+    """Delete all zones from the pdns-server so each module starts clean."""
+    pdns_proto = os.environ.get('PDNS_PROTO', 'http')
+    pdns_host = os.environ.get('PDNS_HOST', 'pdns-server')
+    pdns_port = os.environ.get('PDNS_PORT', '8081')
+    pdns_api_key = os.environ.get('PDNS_API_KEY', 'changeme')
+    base = '{0}://{1}:{2}/api/v1/servers/localhost'.format(
+        pdns_proto, pdns_host, pdns_port)
+    headers = {'X-API-Key': pdns_api_key}
+    try:
+        resp = _requests.get(
+            '{0}/zones'.format(base), headers=headers, timeout=5)
+        if resp.status_code == 200:
+            for zone in resp.json():
+                _requests.delete(
+                    '{0}/zones/{1}'.format(base, zone['id']),
+                    headers=headers, timeout=5)
+    except Exception:
+        pass
 
 
 @pytest.fixture(scope="session")
@@ -19,6 +41,9 @@ def app():
 @pytest.fixture
 def client(app):
     app.config['TESTING'] = True
+    if app.config.get('SESSION_TYPE') == 'sqlalchemy':
+        with app.app_context():
+            app.session_interface.db.create_all()
     client = app.test_client()
     yield client
 
@@ -77,6 +102,7 @@ def basic_auth_user_headers(app):
 
 @pytest.fixture(scope="module")
 def initial_data(app):
+    _purge_pdns_zones()
 
     pdns_proto = os.environ['PDNS_PROTO']
     pdns_host = os.environ['PDNS_HOST']
@@ -127,11 +153,14 @@ def initial_data(app):
             raise e
 
     yield
+    _purge_pdns_zones()
     os.unlink(app.config['TEST_DB_LOCATION'])
 
 
 @pytest.fixture(scope="module")
 def initial_apikey_data(app):
+    _purge_pdns_zones()
+
     pdns_proto = os.environ['PDNS_PROTO']
     pdns_host = os.environ['PDNS_HOST']
     pdns_port = os.environ['PDNS_PORT']
@@ -181,6 +210,7 @@ def initial_apikey_data(app):
             raise e
 
     yield
+    _purge_pdns_zones()
     os.unlink(app.config['TEST_DB_LOCATION'])
 
 
