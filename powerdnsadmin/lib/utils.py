@@ -6,7 +6,7 @@ import ipaddress
 import idna
 
 from collections.abc import Iterable
-from distutils.version import StrictVersion
+from packaging.version import Version as _Version
 from urllib.parse import urlparse
 
 
@@ -188,7 +188,7 @@ def pdns_api_extended_uri(version):
     """
     Check the pdns version
     """
-    if StrictVersion(version) >= StrictVersion('4.0.0'):
+    if _Version(version) >= _Version('4.0.0'):
         return "/api/v1"
     else:
         return ""

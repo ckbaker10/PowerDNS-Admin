@@ -4,7 +4,7 @@ import datetime
 import traceback
 import dns.name
 import dns.reversename
-from distutils.version import StrictVersion
+from packaging.version import Version as _Version
 from flask import Blueprint, render_template, make_response, url_for, current_app, request, redirect, abort, jsonify, g, session
 from flask_login import login_required, current_user, login_manager
 
@@ -88,7 +88,7 @@ def domain(domain_name):
     # TODO:
     #   - Find a way to make it consistent, or
     #   - Only allow one comment for that case
-    if StrictVersion(Setting().get('pdns_version')) >= StrictVersion('4.0.0'):
+    if _Version(Setting().get('pdns_version')) >= _Version('4.0.0'):
         pretty_v6 = Setting().get('pretty_ipv6_ptr')
         for r in rrsets:
             if r['type'] in records_allow_to_edit:

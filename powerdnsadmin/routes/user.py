@@ -1,6 +1,5 @@
 import datetime
 import hashlib
-import imghdr
 import mimetypes
 
 from flask import Blueprint, request, render_template, make_response, jsonify, redirect, url_for, g, session, \
@@ -10,6 +9,19 @@ from flask_login import current_user, login_required, login_manager
 from ..models.user import User, Anonymous
 from ..models.setting import Setting
 from .index import password_policy_check
+
+
+def _imghdr_what(data):
+    """Return the image type from magic bytes (replaces deprecated imghdr)."""
+    if data[:8] == b'\x89PNG\r\n\x1a\n':
+        return 'png'
+    if data[:2] == b'\xff\xd8':
+        return 'jpeg'
+    if data[:6] in (b'GIF87a', b'GIF89a'):
+        return 'gif'
+    if data[:4] == b'RIFF' and data[8:12] == b'WEBP':
+        return 'webp'
+    return None
 
 
 user_bp = Blueprint('user',
@@ -138,7 +150,7 @@ def image():
     def return_image(content, content_type=None):
         """Return the given binary image content. Guess the type if not given."""
         if not content_type:
-            guess = mimetypes.guess_type('example.' + imghdr.what(None, h=content))
+            guess = mimetypes.guess_type('example.' + (_imghdr_what(content) or ''))
             if guess and guess[0]:
                 content_type = guess[0]
 

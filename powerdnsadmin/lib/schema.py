@@ -25,8 +25,6 @@ class Schema(_MarshmallowSchema):
     reuses it for `load`).
     """
 
-    class Meta:
-        ordered = True
 
 
 class DomainSchema(Schema):
