@@ -22,9 +22,11 @@ from ..models.record import Record
 from ..models.domain_template import DomainTemplate
 from ..models.domain_template_record import DomainTemplateRecord
 from ..models.api_key import ApiKey
+from ..models.api_key_rrset_acl import ApiKeyRrsetAcl
 from ..models.base import db
 
 from ..lib.errors import ApiKeyCreateFail
+from ..lib.rrset_acl import validate_pattern_syntax, pattern_within_zone
 from ..lib.schema import ApiPlainKeySchema
 
 apikey_plain_schema = ApiPlainKeySchema(many=True)
@@ -333,6 +335,51 @@ def edit_user(user_username=None):
                                error=result['msg'])
 
 
+def _persist_rrset_acl(apikey, rows):
+    """Validate and atomically replace an api key's rrset_acl rows.
+
+    ``rows`` is a list of dicts with keys ``zone``, ``name``, ``type``,
+    ``replace``, ``delete``. Empty rows are filtered by the caller.
+    Raises ``ValueError`` on validation failure (caught by the route).
+    """
+    new_rows = []
+    if rows:
+        allowed_zone_names = {d.name for d in apikey.domains}
+        domain_cache = {d.name: d for d in apikey.domains}
+        for r in rows:
+            zone = r['zone']
+            name = r['name']
+            rtype = r['type']
+            if not zone or not name:
+                raise ValueError('rrset_acl row needs zone and name')
+            if zone not in allowed_zone_names:
+                raise ValueError(
+                    'rrset_acl zone {0!r} is not in the api key zones'
+                    .format(zone))
+            ok, reason = validate_pattern_syntax(name)
+            if not ok:
+                raise ValueError(
+                    'Invalid pattern {0!r}: {1}'.format(name, reason))
+            if not pattern_within_zone(name, zone):
+                raise ValueError(
+                    'Pattern {0!r} is outside zone {1!r}'.format(name, zone))
+            domain_obj = domain_cache.get(zone)
+            if domain_obj is None:
+                domain_obj = Domain.query.filter(Domain.name == zone).first()
+                if domain_obj is None:
+                    raise ValueError(
+                        'Zone {0!r} does not exist'.format(zone))
+                domain_cache[zone] = domain_obj
+            new_rows.append(ApiKeyRrsetAcl(
+                domain_id=domain_obj.id,
+                record_name_pattern=name,
+                record_type=rtype,
+                allow_replace=r['replace'],
+                allow_delete=r['delete'],
+            ))
+    apikey.replace_rrset_acls(new_rows)
+
+
 @admin_bp.route('/key/edit/<key_id>', methods=['GET', 'POST'])
 @admin_bp.route('/key/edit', methods=['GET', 'POST'])
 @login_required
@@ -358,7 +405,8 @@ def edit_key(key_id=None):
                                domains=domains,
                                accounts=accounts,
                                roles=roles,
-                               create=create)
+                               create=create,
+                               prefill_acme=request.args.get('prefill_acme', ''))
 
     if request.method == 'POST':
         fdata = request.form
@@ -366,6 +414,27 @@ def edit_key(key_id=None):
         role = fdata.getlist('key_role')[0]
         domain_list = fdata.getlist('key_multi_domain')
         account_list = fdata.getlist('key_multi_account')
+
+        # Parse the optional rrset acl rows. Rows are parallel arrays;
+        # selects ensure every row submits exactly one value per column.
+        zones = fdata.getlist('rrset_acl_zone[]')
+        names = fdata.getlist('rrset_acl_name[]')
+        types = fdata.getlist('rrset_acl_type[]')
+        reps = fdata.getlist('rrset_acl_replace[]')
+        dels = fdata.getlist('rrset_acl_delete[]')
+        rrset_acl_rows_raw = []
+        if zones and names and types and reps and dels and \
+                len(zones) == len(names) == len(types) == len(reps) == len(dels):
+            for z, n, t, r, d in zip(zones, names, types, reps, dels):
+                if not z.strip() and not n.strip():
+                    continue
+                rrset_acl_rows_raw.append({
+                    'zone': z.strip(),
+                    'name': n.strip(),
+                    'type': (t or 'TXT').strip().upper(),
+                    'replace': r == '1',
+                    'delete': d == '1',
+                })
 
         # Create new apikey
         if create:
@@ -398,6 +467,19 @@ def edit_key(key_id=None):
                 history_message = "Updated API key {0}".format(apikey.id)
             except Exception as e:
                 current_app.logger.error('Error: {0}'.format(e))
+
+        # Persist rrset_acl rows. For non-User roles the zone access
+        # selectors are hidden by the UI; record-scoped ACLs only make
+        # sense for User-role keys, so silently ignore them otherwise.
+        try:
+            if role == "User":
+                _persist_rrset_acl(apikey, rrset_acl_rows_raw)
+            elif rrset_acl_rows_raw:
+                current_app.logger.info(
+                    'Ignoring rrset_acl rows on non-User key {0}'.format(apikey.id))
+        except ValueError as ve:
+            current_app.logger.error('rrset_acl input error: {0}'.format(ve))
+            flash(str(ve), 'error')
 
         history = History(msg=history_message,
                           detail=json.dumps({
@@ -1363,6 +1445,7 @@ def setting_basic():
         'allow_user_create_domain',
         'allow_user_remove_domain',
         'allow_user_view_history',
+        'allow_user_create_scoped_apikey',
         'auto_ptr',
         'bg_domain_updates',
         'custom_css',

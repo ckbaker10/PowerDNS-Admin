@@ -44,6 +44,12 @@
                                         <i class="fa-solid fa-toolbox"></i>
                                         &nbsp;Zone Settings
                                     </button>
+                                    <button type="button" title="Generate a record-scoped API key for certbot DNS-01 challenges on this zone"
+                                            class="btn btn-primary mt-2 mb-2 ml-2"
+                                            onclick="window.location.href='{{ url_for('admin.edit_key') }}?prefill_acme={{ domain.name }}'">
+                                        <i class="fa-solid fa-key"></i>
+                                        &nbsp;Let's Encrypt Key
+                                    </button>
                                 {% endif %}
                                 {% if current_user.role.name in ['Administrator', 'Operator'] or allow_user_view_history %}
                                     <button type="button" title="Zone Changelog"

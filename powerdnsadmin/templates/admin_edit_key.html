@@ -104,6 +104,48 @@
                                 </div>
                             </div>
                             <!-- /.card-body -->
+                            <div class="card-header key-opts"{% if hide_opts %} style="display: none;"{% endif %}>
+                                <h3 class="card-title">Restrict to Specific Records (optional)</h3>
+                            </div>
+                            <div class="card-body key-opts"{% if hide_opts %} style="display: none;"{% endif %}>
+                                <p>Leave the table empty to keep zone-level access. Add at
+                                    least one row to restrict the key to specific RRsets
+                                    (e.g. for certbot DNS-01 challenges).</p>
+                                <p><strong>Pattern</strong> may be an exact FQDN such as
+                                    <code>_acme-challenge.host.example.com.</code> or use a
+                                    single <code>*</code> as a full label
+                                    (<code>_acme-challenge.*.example.com.</code>).</p>
+                                <table class="table table-sm" id="rrset_acl_table">
+                                    <thead>
+                                        <tr>
+                                            <th>Zone</th>
+                                            <th>Name pattern</th>
+                                            <th>Type</th>
+                                            <th>REPLACE</th>
+                                            <th>DELETE</th>
+                                            <th></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                    {% if key and key.rrset_acls %}
+                                        {% for acl in key.rrset_acls %}
+                                        <tr>
+                                            <td><input class="form-control form-control-sm" name="rrset_acl_zone[]" value="{{ acl.domain.name if acl.domain else '' }}"></td>
+                                            <td><input class="form-control form-control-sm" name="rrset_acl_name[]" value="{{ acl.record_name_pattern }}"></td>
+                                            <td><input class="form-control form-control-sm" name="rrset_acl_type[]" value="{{ acl.record_type }}" style="width:6em"></td>
+                                            <td><select class="form-control form-control-sm" name="rrset_acl_replace[]" style="width:5em"><option value="1" {% if acl.allow_replace %}selected{% endif %}>yes</option><option value="0" {% if not acl.allow_replace %}selected{% endif %}>no</option></select></td>
+                                            <td><select class="form-control form-control-sm" name="rrset_acl_delete[]" style="width:5em"><option value="1" {% if acl.allow_delete %}selected{% endif %}>yes</option><option value="0" {% if not acl.allow_delete %}selected{% endif %}>no</option></select></td>
+                                            <td><button type="button" class="btn btn-sm btn-danger rrset_acl_remove">&times;</button></td>
+                                        </tr>
+                                        {% endfor %}
+                                    {% endif %}
+                                    </tbody>
+                                </table>
+                                <button type="button" class="btn btn-sm btn-secondary" id="rrset_acl_add">
+                                    <i class="fa-solid fa-plus"></i>&nbsp;Add row
+                                </button>
+                            </div>
+                            <!-- /.card-body -->
                             <div class="card-footer">
                                 <button type="button" class="btn btn-secondary float-left" title="Cancel"
                                         onclick="window.location.href='{{ url_for('admin.manage_keys') }}'">
@@ -272,6 +314,49 @@
                 this.qs2.cache();
             }
         });
+        // ---- rrset acl row management ----
+        function addRrsetAclRow(zone, name, type, rep, del) {
+            zone = zone || '';
+            name = name || '';
+            type = type || 'TXT';
+            rep = (rep === undefined) ? '1' : (rep ? '1' : '0');
+            del = (del === undefined) ? '1' : (del ? '1' : '0');
+            var $tr = $(
+                '<tr>' +
+                '<td><input class="form-control form-control-sm" name="rrset_acl_zone[]"></td>' +
+                '<td><input class="form-control form-control-sm" name="rrset_acl_name[]"></td>' +
+                '<td><input class="form-control form-control-sm" name="rrset_acl_type[]" style="width:6em"></td>' +
+                '<td><select class="form-control form-control-sm" name="rrset_acl_replace[]" style="width:5em"><option value="1">yes</option><option value="0">no</option></select></td>' +
+                '<td><select class="form-control form-control-sm" name="rrset_acl_delete[]" style="width:5em"><option value="1">yes</option><option value="0">no</option></select></td>' +
+                '<td><button type="button" class="btn btn-sm btn-danger rrset_acl_remove">&times;</button></td>' +
+                '</tr>'
+            );
+            $tr.find('input[name="rrset_acl_zone[]"]').val(zone);
+            $tr.find('input[name="rrset_acl_name[]"]').val(name);
+            $tr.find('input[name="rrset_acl_type[]"]').val(type);
+            $tr.find('select[name="rrset_acl_replace[]"]').val(rep);
+            $tr.find('select[name="rrset_acl_delete[]"]').val(del);
+            $('#rrset_acl_table tbody').append($tr);
+        }
+        $('#rrset_acl_add').on('click', function () { addRrsetAclRow(); });
+        $('#rrset_acl_table').on('click', '.rrset_acl_remove', function () {
+            $(this).closest('tr').remove();
+        });
+
+        {% if prefill_acme %}
+            $(document.body).ready(function () {
+                // One-shot: pre-select User role, the requested zone, and add
+                // a TXT acl row for `_acme-challenge.<zone>.`.
+                $('#key_role').val('User').trigger('change');
+                var zone = {{ prefill_acme | tojson }};
+                $('#key_multi_domain option[value="' + zone + '"]')
+                    .prop('selected', true).trigger('change');
+                addRrsetAclRow(zone, '_acme-challenge.' + zone + '.', 'TXT', '1', '1');
+                $('input[name="description"]').val(
+                    'certbot DNS-01 for ' + zone);
+            });
+        {% endif %}
+
         {% if plain_key %}
             $(document.body).ready(function () {
                 var modal = $("#modal_show_key");

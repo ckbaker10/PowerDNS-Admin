@@ -52,6 +52,16 @@ class DomainOverrideForbidden(StructuredException):
         self.message = message
         self.name = name
 
+
+class RrsetAclForbidden(StructuredException):
+    status_code = 403
+
+    def __init__(self, name=None, message="Rrset not permitted by api key acl"):
+        StructuredException.__init__(self)
+        self.message = message
+        self.name = name
+
+
 class ApiKeyCreateFail(StructuredException):
     status_code = 500
 

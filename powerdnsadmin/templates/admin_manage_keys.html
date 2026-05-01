@@ -45,6 +45,7 @@
                             <th>Description</th>
                             <th>Zones</th>
                             <th>Accounts</th>
+                            <th>Scoped</th>
                             <th>Actions</th>
                         </tr>
                         </thead>
@@ -58,6 +59,13 @@
                                 {% endif %}{% endfor %}</td>
                                 <td>{% for account in key.accounts %}{{ account.name }}{% if not loop.last %},
                                 {% endif %}{% endfor %}</td>
+                                <td>
+                                    {% if key.rrset_acls %}
+                                        <span class="badge badge-warning" data-toggle="tooltip" title="{% for r in key.rrset_acls %}{{ r.record_name_pattern }} {{ r.record_type }}{% if not loop.last %} | {% endif %}{% endfor %}">{{ key.rrset_acls|length }} rule(s)</span>
+                                    {% else %}
+                                        <span class="text-muted">&mdash;</span>
+                                    {% endif %}
+                                </td>
                                 <td>
                                     <div class="dropdown">
                                         <button class="btn btn-primary dropdown-toggle" type="button" id="dropdownMenu"
