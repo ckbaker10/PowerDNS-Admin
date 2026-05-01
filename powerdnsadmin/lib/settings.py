@@ -8,14 +8,14 @@ class AppSettings(object):
     defaults = {
         # Flask Settings
         'bind_address': '0.0.0.0',
-        'csrf_cookie_secure': False,
+        'csrf_cookie_secure': True,
         'log_level': 'WARNING',
         'port': 9191,
         'salt': '$2b$12$yLUMTIfl21FKJQpTkRQXCu',
         'secret_key': 'e951e5a1f4b94151b360f47edf596dd2',
-        'session_cookie_secure': False,
+        'session_cookie_secure': True,
         'session_type': 'sqlalchemy',
-        'sqlalchemy_track_modifications': True,
+        'sqlalchemy_track_modifications': False,
         'sqlalchemy_database_uri': 'sqlite:///' + os.path.join(basedir, 'pdns.db'),
         'sqlalchemy_engine_options': {},
 
@@ -36,7 +36,7 @@ class AppSettings(object):
         'remote_user_enabled': False,
         'remote_user_cookies': [],
         'remote_user_logout_url': '',
-        'hsts_enabled': False,
+        'hsts_enabled': True,
         'server_external_ssl': True,
         'maintenance': False,
         'fullscreen_layout': True,

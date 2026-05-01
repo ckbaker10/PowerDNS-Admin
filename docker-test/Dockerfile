@@ -1,4 +1,4 @@
-FROM debian:bullseye-slim
+FROM debian:bookworm-slim
 LABEL maintainer="k@ndk.name"
 
 ENV LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 LANGUAGE=en_US.UTF-8
@@ -6,7 +6,9 @@ ENV LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 LANGUAGE=en_US.UTF-8
 RUN apt-get update -y \
     && apt-get install -y --no-install-recommends \
         apt-transport-https \
+        ca-certificates \
         curl \
+        gnupg \
         build-essential \
         libffi-dev \
         libldap2-dev \
@@ -24,9 +26,15 @@ RUN apt-get update -y \
         python3-dev \
         python3-pip \
         python3-setuptools \
-    && curl -sL https://deb.nodesource.com/setup_lts.x | bash - \
-    && curl -sS https://dl.yarnpkg.com/debian/pubkey.gpg | apt-key add - \
-    && echo "deb https://dl.yarnpkg.com/debian/ stable main" > /etc/apt/sources.list.d/yarn.list \
+    && install -d /etc/apt/keyrings \
+    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+        | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_lts.x nodistro main" \
+        > /etc/apt/sources.list.d/nodesource.list \
+    && curl -fsSL https://dl.yarnpkg.com/debian/pubkey.gpg \
+        | gpg --dearmor -o /etc/apt/keyrings/yarn.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/yarn.gpg] https://dl.yarnpkg.com/debian/ stable main" \
+        > /etc/apt/sources.list.d/yarn.list \
     && apt-get update -y \
     && apt-get install -y --no-install-recommends \
         nodejs \
@@ -38,8 +46,8 @@ RUN apt-get update -y \
 COPY ./requirements.txt /app/requirements.txt
 
 WORKDIR /app
-RUN pip3 install --upgrade pip
-RUN pip3 install -r requirements.txt
+RUN pip3 install --upgrade pip --break-system-packages
+RUN pip3 install -r requirements.txt --break-system-packages
 
 COPY . /app
 

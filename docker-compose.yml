@@ -5,7 +5,7 @@ services:
     image: powerdnsadmin/pda-legacy:latest
     container_name: powerdns_admin
     ports:
-      - "9191:80"
+      - "9191:8080"
     logging:
       driver: json-file
       options:
@@ -15,3 +15,8 @@ services:
       - GUNICORN_TIMEOUT=60
       - GUNICORN_WORKERS=2
       - GUNICORN_LOGLEVEL=DEBUG
+      # REQUIRED: PowerDNS-Admin will refuse to start without a non-default
+      # SECRET_KEY. Generate one with:
+      #   python -c 'import secrets; print(secrets.token_hex(32))'
+      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY must be set in the environment or .env file}
+      - SALT=${SALT:-}

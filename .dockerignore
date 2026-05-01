@@ -110,3 +110,17 @@ docker-compose*
 # Others
 .lgtm.yml
 .travis.yml
+
+# Project-specific build context trimming (added by audit)
+.venv/
+venv/
+env/
+tests/
+docs/
+docker-test/
+*.md
+.env
+.env.*
+!.env.example
+.ruff_cache
+.mypy_cache

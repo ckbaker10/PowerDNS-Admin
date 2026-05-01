@@ -1,4 +1,4 @@
-FROM alpine:3.17 AS builder
+FROM alpine:3.20 AS builder
 
 ARG BUILD_DEPENDENCIES="build-base \
     libffi-dev \
@@ -68,21 +68,20 @@ RUN mkdir -p /app && \
     cp -r /build/configs/docker_config.py /app/configs
 
 # Build image
-FROM alpine:3.17
+FROM alpine:3.20
 
 ENV FLASK_APP=/app/powerdnsadmin/__init__.py \
     USER=pda
 
-RUN apk add --no-cache mariadb-connector-c postgresql-client py3-gunicorn py3-pyldap py3-flask py3-psycopg2 xmlsec tzdata libcap && \
+RUN apk add --no-cache mariadb-connector-c postgresql-client py3-gunicorn py3-pyldap py3-flask py3-psycopg2 xmlsec tzdata && \
     addgroup -S ${USER} && \
     adduser -S -D -G ${USER} ${USER} && \
     mkdir /data && \
-    chown ${USER}:${USER} /data && \
-    setcap cap_net_bind_service=+ep $(readlink -f /usr/bin/python3) && \
-    apk del libcap
+    chown ${USER}:${USER} /data
 
 COPY --from=builder /usr/bin/flask /usr/bin/
-COPY --from=builder /usr/lib/python3.10/site-packages /usr/lib/python3.10/site-packages/
+# Alpine 3.20 ships Python 3.12. Bump this path together with the base image.
+COPY --from=builder /usr/lib/python3.12/site-packages/ /usr/lib/python3.12/site-packages/
 COPY --from=builder --chown=root:${USER} /app /app/
 COPY ./docker/entrypoint.sh /usr/bin/
 
@@ -90,8 +89,10 @@ WORKDIR /app
 RUN chown ${USER}:${USER} ./configs /app && \
     cat ./powerdnsadmin/default_config.py ./configs/docker_config.py > ./powerdnsadmin/docker_config.py
 
-EXPOSE 80/tcp
+# Bind to an unprivileged port inside the container; orchestrators publish
+# host:80 -> container:8080 without needing CAP_NET_BIND_SERVICE.
+EXPOSE 8080/tcp
 USER ${USER}
-HEALTHCHECK --interval=5s --timeout=5s --start-period=20s --retries=5 CMD wget --output-document=- --quiet --tries=1 http://127.0.0.1${SCRIPT_NAME:-/}
+HEALTHCHECK --interval=5s --timeout=5s --start-period=20s --retries=5 CMD wget --output-document=- --quiet --tries=1 http://127.0.0.1:8080${SCRIPT_NAME:-/}
 ENTRYPOINT ["entrypoint.sh"]
 CMD ["gunicorn","powerdnsadmin:create_app()"]

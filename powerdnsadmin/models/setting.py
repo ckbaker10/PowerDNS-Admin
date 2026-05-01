@@ -106,9 +106,18 @@ class Setting(db.Model):
                 if hasattr(result, 'value'):
                     result = result.value
 
-                return AppSettings.convert_type(setting, result)
+                value = AppSettings.convert_type(setting, result)
             else:
-                return AppSettings.defaults[setting]
+                value = AppSettings.defaults[setting]
+
+            # Hard floor for outbound timeouts: 0/None lets requests block
+            # forever and pin a gunicorn worker if PDNS hangs.
+            if setting == 'pdns_api_timeout':
+                try:
+                    value = max(int(value or 0), 5)
+                except (TypeError, ValueError):
+                    value = 30
+            return value
         else:
             current_app.logger.error('Unknown setting queried: {0}'.format(setting))
 

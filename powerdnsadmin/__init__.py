@@ -30,7 +30,9 @@ def create_app(config=None):
         app.logger.setLevel(gunicorn_logger.level)
 
     # Proxy
-    app.wsgi_app = ProxyFix(app.wsgi_app)
+    # ProxyFix is wired up after the config has been loaded so the trust-hop
+    # counts are honoured. Defaults are 0, which leaves request metadata
+    # untouched and prevents X-Forwarded-* spoofing from untrusted clients.
 
     # Load config from env variables if using docker
     if os.path.exists(os.path.join(app.root_path, 'docker_config.py')):
@@ -52,6 +54,55 @@ def create_app(config=None):
 
     # Load any settings defined with environment variables
     AppSettings.load_environment(app)
+
+    # Refuse to start with the shipped placeholder SECRET_KEY/SALT in any
+    # non-testing context. These constants are public (they are checked into
+    # the source tree) so leaving them in place would let any reader forge
+    # signed sessions, password-reset tokens and CSRF tokens.
+    from .default_config import (
+        INSECURE_DEFAULT_SECRET_KEY,
+        INSECURE_DEFAULT_SALT,
+    )
+    allow_insecure = (
+        app.config.get('TESTING')
+        or os.environ.get('PDA_ALLOW_INSECURE_SECRET_KEY', '').lower()
+        in ('1', 'true', 'yes')
+    )
+    if not allow_insecure:
+        if app.config.get('SECRET_KEY') == INSECURE_DEFAULT_SECRET_KEY:
+            raise RuntimeError(
+                "Refusing to start: SECRET_KEY is still the shipped default. "
+                "Set the SECRET_KEY environment variable (or override it in "
+                "your config file) to a long, random value before starting "
+                "PowerDNS-Admin. Generate one with: "
+                "python -c 'import secrets; print(secrets.token_hex(32))'"
+            )
+        if app.config.get('SALT') == INSECURE_DEFAULT_SALT:
+            app.logger.warning(
+                "SALT is still the shipped default. Override the SALT "
+                "environment variable to invalidate previously-issued "
+                "password-reset and email-confirmation tokens."
+            )
+
+    # Apply ProxyFix only when the operator has explicitly trusted at least
+    # one upstream hop. Without this guard, a direct client could spoof
+    # X-Forwarded-For and bypass any IP-based controls downstream.
+    proxy_hops = max(
+        app.config.get('PROXY_FIX_X_FOR', 0),
+        app.config.get('PROXY_FIX_X_PROTO', 0),
+        app.config.get('PROXY_FIX_X_HOST', 0),
+        app.config.get('PROXY_FIX_X_PORT', 0),
+        app.config.get('PROXY_FIX_X_PREFIX', 0),
+    )
+    if proxy_hops > 0:
+        app.wsgi_app = ProxyFix(
+            app.wsgi_app,
+            x_for=app.config.get('PROXY_FIX_X_FOR', 0),
+            x_proto=app.config.get('PROXY_FIX_X_PROTO', 0),
+            x_host=app.config.get('PROXY_FIX_X_HOST', 0),
+            x_port=app.config.get('PROXY_FIX_X_PORT', 0),
+            x_prefix=app.config.get('PROXY_FIX_X_PREFIX', 0),
+        )
 
     # HSTS
     if app.config.get('HSTS_ENABLED'):

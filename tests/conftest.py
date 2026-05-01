@@ -2,7 +2,6 @@ import os
 from base64 import b64encode
 
 import pytest
-from flask_migrate import upgrade as flask_migrate_upgrade
 
 from powerdnsadmin import create_app
 from powerdnsadmin.models.api_key import ApiKey
@@ -90,6 +89,7 @@ def initial_data(app):
 
     with app.app_context():
         try:
+            from flask_migrate import upgrade as flask_migrate_upgrade
             flask_migrate_upgrade(directory="migrations")
             db.session.add(api_url_setting)
             db.session.add(api_key_setting)
@@ -138,6 +138,7 @@ def initial_apikey_data(app):
 
     with app.app_context():
         try:
+            from flask_migrate import upgrade as flask_migrate_upgrade
             flask_migrate_upgrade(directory="migrations")
             db.session.add(api_url_setting)
             db.session.add(api_key_setting)
