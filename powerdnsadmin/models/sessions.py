@@ -1,5 +1,4 @@
-from flask import current_app, session
-from flask_login import current_user
+from flask import current_app
 from .base import db
 
 

@@ -16,7 +16,7 @@ def _env_bool(name, default):
 INSECURE_DEFAULT_SECRET_KEY = 'e951e5a1f4b94151b360f47edf596dd2'
 INSECURE_DEFAULT_SALT = '$2b$12$yLUMTIfl21FKJQpTkRQXCu'
 
-BIND_ADDRESS = '0.0.0.0'
+BIND_ADDRESS = '0.0.0.0'  # nosec B104  # Bind inside container; orchestrator publishes the port.
 CAPTCHA_ENABLE = True
 CAPTCHA_HEIGHT = 60
 CAPTCHA_LENGTH = 6

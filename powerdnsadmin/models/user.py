@@ -344,7 +344,7 @@ class User(db.Model):
                             else:
                                 current_app.logger.error('Invalid LDAP type')
                                 return False
-                        except Exception as e:
+                        except Exception:
                             current_app.logger.error(
                                 'LDAP group lookup for user "{0}" has failed. Authentication request from {1}'
                                 .format(self.username, src_ip))

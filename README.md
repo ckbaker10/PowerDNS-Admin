@@ -84,6 +84,10 @@ our [Discord Server](https://discord.powerdnsadmin.org).
 
 Please see our [Security Policy](https://github.com/PowerDNS-Admin/PowerDNS-Admin/blob/master/SECURITY.md).
 
+For the list of known advisories that are still open against the
+pinned dependencies (and the major-version upgrades required to clear
+them), see [docs/SECURITY_BACKLOG.md](docs/SECURITY_BACKLOG.md).
+
 ## Contributing
 
 Please see our [Contribution Guide](https://github.com/PowerDNS-Admin/PowerDNS-Admin/blob/master/docs/CONTRIBUTING.md).

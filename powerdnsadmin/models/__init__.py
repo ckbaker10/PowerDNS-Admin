@@ -18,7 +18,29 @@ from .domain_template_record import DomainTemplateRecord
 from .record import Record
 from .record_entry import RecordEntry
 
+# Explicit re-export list so ruff (F401) treats this module as a
+# package-level barrel import instead of flagging every model.
+__all__ = [
+    "db",
+    "User",
+    "Role",
+    "Account",
+    "AccountUser",
+    "Server",
+    "History",
+    "ApiKey",
+    "ApiKeyAccount",
+    "Setting",
+    "Domain",
+    "DomainSetting",
+    "DomainUser",
+    "DomainTemplate",
+    "DomainTemplateRecord",
+    "Record",
+    "RecordEntry",
+]
+
 
 def init_app(app):
     db.init_app(app)
-    _migrate = Migrate(app, db)  # lgtm [py/unused-local-variable]
+    _migrate = Migrate(app, db)  # noqa: F841  # lgtm [py/unused-local-variable]

@@ -8,11 +8,6 @@ class Role(db.Model):
     users = db.relationship('User', back_populates='role', lazy=True)
     apikeys = db.relationship('ApiKey', back_populates='role', lazy=True)
 
-    def __init__(self, id=None, name=None, description=None):
-        self.id = id
-        self.name = name
-        self.description = description
-
     # allow database autoincrement to do its own ID assignments
     def __init__(self, name=None, description=None):
         self.id = None

@@ -56,7 +56,7 @@ def fetch_remote(remote_url,
     try:
         if r.status_code not in (200, 201, 204, 400, 409, 422):
             r.raise_for_status()
-    except Exception as e:
+    except Exception:
         msg = "Returned status {0} and content {1}".format(r.status_code, r.text)
         raise RuntimeError('Error while fetching {0}. {1}'.format(
             remote_url, msg))
@@ -121,7 +121,7 @@ def display_record_name(data):
     if record_name == domain_name:
         return '@'
     else:
-        return re.sub('\.{}$'.format(domain_name), '', record_name)
+        return re.sub(r'\.{}$'.format(domain_name), '', record_name)
 
 
 def display_master_name(data):

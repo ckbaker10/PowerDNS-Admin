@@ -4,7 +4,7 @@ from functools import wraps
 from flask import g, request, abort, current_app, Response
 from flask_login import current_user
 
-from .models import User, ApiKey, Setting, Domain, Setting
+from .models import User, ApiKey, Domain, Setting
 from .lib.errors import RequestIsNotJSON, NotEnoughPrivileges, RecordTTLNotAllowed, RecordTypeNotAllowed
 from .lib.errors import DomainAccessForbidden, DomainOverrideForbidden
 
@@ -193,7 +193,7 @@ def api_basic_auth(f):
                 abort(401)
             else:
                 user = User.query.filter(User.username == username).first()
-                current_user = user  # lgtm [py/unused-local-variable]
+                current_user = user  # noqa: F841  # lgtm [py/unused-local-variable]
         except Exception as e:
             current_app.logger.error('Error: {0}'.format(e))
             abort(401)

@@ -7,7 +7,7 @@ class AppSettings(object):
 
     defaults = {
         # Flask Settings
-        'bind_address': '0.0.0.0',
+        'bind_address': '0.0.0.0',  # nosec B104  # default for in-container bind
         'csrf_cookie_secure': True,
         'log_level': 'WARNING',
         'port': 9191,
@@ -600,12 +600,12 @@ class AppSettings(object):
             if (var_type == dict or var_type == list) and isinstance(value, str) and len(value) > 0:
                 try:
                     return json.loads(value)
-                except JSONDecodeError as e:
+                except JSONDecodeError:
                     # Provide backwards compatibility for legacy non-JSON format
                     value = value.replace("'", '"').replace('True', 'true').replace('False', 'false')
                     try:
                         return json.loads(value)
-                    except JSONDecodeError as e:
+                    except JSONDecodeError:
                         raise ValueError('Cannot parse json {} for variable {}'.format(value, name))
 
             if var_type == str:

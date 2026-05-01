@@ -53,11 +53,6 @@ class Setting(db.Model):
     ZONE_TYPE_FORWARD = 'forward'
     ZONE_TYPE_REVERSE = 'reverse'
 
-    def __init__(self, id=None, name=None, value=None):
-        self.id = id
-        self.name = name
-        self.value = value
-
     # allow database autoincrement to do its own ID assignments
     def __init__(self, name=None, value=None):
         self.id = None
