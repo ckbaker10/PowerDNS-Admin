@@ -40,7 +40,8 @@
                         <!-- /.card-header -->
                         <div class="card-body table-responsive">
                             <table id="tbl_users"
-                                   class="table table-bordered table-striped table-hover table-sm records">
+                                   class="table table-bordered table-striped table-hover table-sm records"
+                                   style="width:100%">
                                 <thead>
                                 <tr>
                                     <th>Username</th>
@@ -52,61 +53,7 @@
                                     <th>Action</th>
                                 </tr>
                                 </thead>
-                                <tbody>
-                                {% for user in users %}
-                                    <tr class="odd gradeX">
-                                        <td>{{ user.username }}</td>
-                                        <td>{{ user.firstname }}</td>
-                                        <td>{{ user.lastname }}</td>
-                                        <td>{{ user.email }}</td>
-                                        <td>
-                                            <select id="{{ user.username }}" class="user_role"
-                                                    {% if user.username==current_user.username or (current_user.role.name=='Operator' and user.role.name=='Administrator') %}disabled{% endif %}>
-                                                {% for role in roles %}
-                                                    <option value="{{ role.name }}"
-                                                            {% if role.id==user.role.id %}selected{% endif %}>
-                                                        {{ role.name }}
-                                                    </option>
-                                                {% endfor %}
-                                            </select>
-                                        </td>
-                                        <td>
-                                            <button type="button" class="btn btn-warning button_revoke"
-                                                    title="Revoke Privileges"
-                                                    id="{{ user.username }}"
-                                                    {% if current_user.role.name=='Operator' and user.role.name=='Administrator' %}disabled{% endif %}>
-                                                <i class="fa-solid fa-link-slash"></i>
-                                            </button>
-                                        </td>
-                                        <td>
-                                            <div class="dropdown">
-                                                <button class="btn btn-primary dropdown-toggle" type="button"
-                                                        id="dropdownMenu" data-toggle="dropdown" aria-haspopup="true"
-                                                        aria-expanded="false"
-                                                        {% if current_user.role.name=='Operator' and user.role.name=='Administrator' %}disabled{% endif %}>
-                                                    <i class="fa-solid fa-bars"></i>
-                                                </button>
-                                                <div class="dropdown-menu" aria-labelledby="dropdownMenu">
-                                                    <button type="button" class="dropdown-item btn-warning"
-                                                            onclick="window.location.href='{{ url_for('admin.edit_user', user_username=user.username) }}'">
-                                                        <i class="fa-solid fa-edit"></i>&nbsp;Edit User
-                                                    </button>
-                                                    {% if not user.username==current_user.username or (current_user.role.name=='Operator' and user.role.name=='Administrator') %}
-                                                        <div class="dropdown-divider"></div>
-                                                        <button type="button"
-                                                                class="dropdown-item btn-secondary button_delete"
-                                                                id="{{ user.username }}">
-                                                            <span style="color: red;">
-                                                                <i class="fa-solid fa-trash"></i>&nbsp;Delete User
-                                                            </span>
-                                                        </button>
-                                                    {% endif %}
-                                                </div>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                {% endfor %}
-                                </tbody>
+                                <tbody></tbody>
                             </table>
                         </div>
                         <!-- /.card-body -->
@@ -123,29 +70,42 @@
 
 {% block extrascripts %}
     <script>
-        // set up user data table
-        $("#tbl_users").DataTable({
+        // Server-side DataTable: paging/search/sort all happen in
+        // admin.manage_user_data. Per-row controls (role select, revoke
+        // button, action menu) are returned pre-rendered as HTML.
+        var usersTable = $("#tbl_users").DataTable({
+            "processing": true,
+            "serverSide": true,
+            "ajax": {
+                "url": "{{ url_for('admin.manage_user_data') }}",
+                "type": "GET"
+            },
             "paging": true,
             "lengthChange": true,
             "searching": true,
             "ordering": true,
-            "info": false,
+            "info": true,
             "autoWidth": false,
             "lengthMenu": [
                 [10, 25, 50, 100, -1],
                 [10, 25, 50, 100, "All"]
             ],
-            "pageLength": 10
+            "pageLength": 10,
+            "order": [[0, "asc"]],
+            "columnDefs": [
+                // Privileges and Action columns are not orderable.
+                {"orderable": false, "targets": [4, 5, 6]}
+            ]
         });
 
-        // handle revocation of privileges
+        // handle revocation of privileges (delegated; rows are async)
         $(document.body).on('click', '.button_revoke', function () {
             var modal = $("#modal_revoke");
             var username = $(this).prop('id');
             var info = "Are you sure you want to revoke all privileges for user " + username +
                 "? They will not able to access any zone.";
             modal.find('.modal-body p').text(info);
-            modal.find('#button_revoke_confirm').click(function () {
+            modal.find('#button_revoke_confirm').off('click').on('click', function () {
                 var postdata = {
                     'action': 'revoke_user_privileges',
                     'data': username,
@@ -163,7 +123,7 @@
             var username = $(this).prop('id');
             var info = "Are you sure you want to delete user " + username + "?";
             modal.find('.modal-body p').text(info);
-            modal.find('#button_delete_confirm').click(function () {
+            modal.find('#button_delete_confirm').off('click').on('click', function () {
                 var postdata = {
                     'action': 'delete_user',
                     'data': username,
@@ -171,6 +131,7 @@
                 }
                 applyChanges(postdata, $SCRIPT_ROOT + '/admin/manage-user', false, true);
                 modal.modal('hide');
+                usersTable.ajax.reload(null, false);
             })
             modal.modal('show');
         });

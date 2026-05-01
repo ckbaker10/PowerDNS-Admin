@@ -37,7 +37,7 @@
                 </div>
                 <!-- /.card-header -->
                 <div class="card-body table-responsive">
-                    <table id="tbl_keys" class="table table-bordered table-striped table-hover table-sm records">
+                    <table id="tbl_keys" class="table table-bordered table-striped table-hover table-sm records" style="width:100%">
                         <thead>
                         <tr>
                             <th>Id</th>
@@ -48,40 +48,7 @@
                             <th>Actions</th>
                         </tr>
                         </thead>
-                        <tbody>
-                        {% for key in keys %}
-                            <tr class="odd gradeX">
-                                <td>{{ key.id }}</td>
-                                <td>{{ key.role.name }}</td>
-                                <td>{{ key.description }}</td>
-                                <td>{% for domain in key.domains %}{{ domain.name }}{% if not loop.last %},
-                                {% endif %}{% endfor %}</td>
-                                <td>{% for account in key.accounts %}{{ account.name }}{% if not loop.last %},
-                                {% endif %}{% endfor %}</td>
-                                <td>
-                                    <div class="dropdown">
-                                        <button class="btn btn-primary dropdown-toggle" type="button" id="dropdownMenu"
-                                                data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                                            <i class="fa-solid fa-bars"></i>
-                                        </button>
-                                        <div class="dropdown-menu" aria-labelledby="dropdownMenu">
-                                            <button type="button" class="dropdown-item btn-warning"
-                                                    onclick="window.location.href='{{ url_for('admin.edit_key', key_id=key.id) }}'">
-                                                <i class="fa-solid fa-edit"></i>&nbsp;Edit API Key
-                                            </button>
-                                            <div class="dropdown-divider"></div>
-                                            <button type="button" class="dropdown-item btn-secondary button_delete"
-                                                    id="{{ key.id }}">
-                                                <font color="red">
-                                                    <i class="fa-solid fa-trash"></i>&nbsp;Delete API Key
-                                                </font>
-                                            </button>
-                                        </div>
-                                    </div>
-                                </td>
-                            </tr>
-                        {% endfor %}
-                        </tbody>
+                        <tbody></tbody>
                     </table>
                 </div>
                 <!-- /.card-body -->
@@ -94,28 +61,41 @@
 
 {% block extrascripts %}
     <script>
-        // set up key data table
+        // Server-side DataTable: paging/search/sort all happen on the
+        // backend (admin.manage_keys_data). The action cell is returned
+        // pre-rendered as HTML so this stays trivial.
         $("#tbl_keys").DataTable({
+            "processing": true,
+            "serverSide": true,
+            "ajax": {
+                "url": "{{ url_for('admin.manage_keys_data') }}",
+                "type": "GET"
+            },
             "paging": true,
             "lengthChange": true,
             "searching": true,
             "ordering": true,
-            "info": false,
+            "info": true,
             "autoWidth": false,
             "lengthMenu": [
                 [10, 25, 50, 100, -1],
                 [10, 25, 50, 100, "All"]
             ],
-            "pageLength": 10
+            "pageLength": 10,
+            "order": [[0, "desc"]],
+            "columnDefs": [
+                // Domains, Accounts and Actions are not orderable.
+                {"orderable": false, "targets": [3, 4, 5]}
+            ]
         });
 
-        // handle deletion of keys
+        // handle deletion of keys (delegated; rows are injected by DataTables)
         $(document.body).on('click', '.button_delete', function () {
             var modal = $("#modal_delete");
-            var key_id = $(this).prop('id');
+            var key_id = $(this).data('key-id');
             var info = "Are you sure you want to delete key #" + key_id + "?";
             modal.find('.modal-body p').text(info);
-            modal.find('#button_delete_confirm').click(function () {
+            modal.find('#button_delete_confirm').off('click').on('click', function () {
                 var postdata = {
                     'action': 'delete_key',
                     'data': key_id,
@@ -123,6 +103,8 @@
                 }
                 applyChanges(postdata, $SCRIPT_ROOT + '/admin/manage-keys', false, true);
                 modal.modal('hide');
+                // Refresh the table so the deleted row disappears.
+                $("#tbl_keys").DataTable().ajax.reload(null, false);
             })
             modal.modal('show');
         });

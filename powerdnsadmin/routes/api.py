@@ -415,6 +415,25 @@ def api_get_apikeys(domain_name):
     apikeys = []
     current_app.logger.debug("Getting apikeys")
 
+    # Optional opt-in pagination. Old clients that omit ``page`` and
+    # ``per_page`` keep the previous "return everything" behaviour so
+    # we don't break the API contract; new callers can scope the
+    # response to a single page. Per_page is hard-capped at 1000 to
+    # prevent a hostile client from forcing an unbounded scan.
+    page_arg = request.args.get('page')
+    per_page_arg = request.args.get('per_page')
+    paginate = page_arg is not None or per_page_arg is not None
+    if paginate:
+        try:
+            page = max(int(page_arg or 1), 1)
+        except (TypeError, ValueError):
+            page = 1
+        try:
+            per_page = int(per_page_arg or 100)
+        except (TypeError, ValueError):
+            per_page = 100
+        per_page = max(1, min(per_page, 1000))
+
     if current_user.role.name not in ['Administrator', 'Operator']:
         if domain_name:
             msg = "Check if zone {0} exists and is allowed for user.".format(
@@ -440,12 +459,30 @@ def api_get_apikeys(domain_name):
     else:
         current_app.logger.debug("Getting all zones for administrative user")
         try:
-            apikeys = ApiKey.query.all()
+            if paginate:
+                # ``error_out=False`` returns an empty page rather than
+                # 404'ing on an out-of-range page number.
+                pagination = (
+                    ApiKey.query
+                    .order_by(ApiKey.id)
+                    .paginate(page=page, per_page=per_page, error_out=False)
+                )
+                apikeys = pagination.items
+            else:
+                apikeys = ApiKey.query.all()
             current_app.logger.debug(apikey_schema.dump(apikeys))
         except Exception as e:
             current_app.logger.error('Error: {0}'.format(e))
             abort(500)
 
+    if paginate and current_user.role.name in ['Administrator', 'Operator']:
+        return jsonify({
+            'page': pagination.page,
+            'per_page': pagination.per_page,
+            'total': pagination.total,
+            'pages': pagination.pages,
+            'items': apikey_schema.dump(apikeys),
+        }), 200
     return jsonify(apikey_schema.dump(apikeys)), 200
 
 

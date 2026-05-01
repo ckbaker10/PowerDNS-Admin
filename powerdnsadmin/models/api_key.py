@@ -15,12 +15,18 @@ class ApiKey(db.Model):
     description = db.Column(db.String(255))
     role_id = db.Column(db.Integer, db.ForeignKey('role.id'))
     role = db.relationship('Role', back_populates="apikeys", lazy=True)
+    # selectin loading avoids the N+1 the manage_keys page used to fire when
+    # iterating ``key.domains`` and ``key.accounts`` for each row in the
+    # template (one extra query per key per relationship). One IN-batch per
+    # relationship instead.
     domains = db.relationship("Domain",
                               secondary="domain_apikey",
-                              back_populates="apikeys")
+                              back_populates="apikeys",
+                              lazy="selectin")
     accounts = db.relationship("Account",
                                secondary="apikey_account",
-                               back_populates="apikeys")
+                               back_populates="apikeys",
+                               lazy="selectin")
 
     def __init__(self, key=None, desc=None, role_name=None, domains=[], accounts=[]):
         self.id = None

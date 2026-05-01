@@ -29,9 +29,18 @@ WORKDIR /build
 # We copy just the requirements.txt first to leverage Docker cache
 COPY ./requirements.txt /build/requirements.txt
 
-# Get application dependencies
-RUN pip install --upgrade pip && \
-    pip install --use-pep517 -r requirements.txt
+# Build wheels for every runtime dependency. The runtime stage will
+# install from this directory with --no-index so no source builds, no
+# network access and no toolchain are needed at install time. This
+# also pre-bakes binary wheels for python-ldap, lxml, psycopg2, etc.,
+# so the runtime image only has to ship the matching shared libraries.
+RUN pip install --no-cache-dir --upgrade pip wheel && \
+    mkdir -p /wheels && \
+    pip wheel --no-cache-dir --wheel-dir=/wheels -r requirements.txt
+
+# Install the wheels locally so ``flask assets build`` below can run
+# against the resolved dependency set during the build stage.
+RUN pip install --no-cache-dir --no-index --find-links=/wheels -r requirements.txt
 
 # Add sources
 COPY . /build
@@ -73,15 +82,34 @@ FROM alpine:3.20
 ENV FLASK_APP=/app/powerdnsadmin/__init__.py \
     USER=pda
 
-RUN apk add --no-cache mariadb-connector-c postgresql-client py3-gunicorn py3-pyldap py3-flask py3-psycopg2 xmlsec tzdata && \
+RUN apk add --no-cache \
+        python3 \
+        py3-pip \
+        mariadb-connector-c \
+        postgresql-libs \
+        libldap \
+        libsasl \
+        xmlsec \
+        tzdata && \
     addgroup -S ${USER} && \
     adduser -S -D -G ${USER} ${USER} && \
     mkdir /data && \
     chown ${USER}:${USER} /data
 
-COPY --from=builder /usr/bin/flask /usr/bin/
-# Alpine 3.20 ships Python 3.12. Bump this path together with the base image.
-COPY --from=builder /usr/lib/python3.12/site-packages/ /usr/lib/python3.12/site-packages/
+# Wheels come from the builder stage. Installing with --no-index +
+# --find-links keeps the runtime layer hermetic (no PyPI access, no
+# build toolchain) and guarantees the versions match requirements.txt.
+# We deliberately do NOT install Alpine's py3-gunicorn/py3-flask/
+# py3-pyldap/py3-psycopg2: those packages would shadow our pins and
+# silently downgrade CVE fixes for gunicorn, requests, etc.
+COPY --from=builder /wheels /wheels
+COPY --from=builder /build/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir --no-index --find-links=/wheels \
+        -r /tmp/requirements.txt && \
+    rm -rf /wheels /tmp/requirements.txt /root/.cache
+
+# The ``flask`` console script is installed by the Flask wheel above,
+# so we no longer need to copy it from the builder stage.
 COPY --from=builder --chown=root:${USER} /app /app/
 COPY ./docker/entrypoint.sh /usr/bin/
 

@@ -947,36 +947,41 @@ def dyndns_update():
         return render_template('dyndns.html', response='nohost'), 200
 
     try:
+        # Build the candidate set of zone names from the hostname
+        # (a.b.example.com -> ['a.b.example.com', 'b.example.com',
+        # 'example.com', 'com']) so we can look up the matching zone in
+        # a single indexed query instead of loading every zone the user
+        # can see — important for installs with tens of thousands of
+        # zones where DynDNS would otherwise stream the whole table on
+        # every request.
+        candidate_names = []
+        segments = hostname.split('.')
+        for i in range(len(segments)):
+            candidate_names.append('.'.join(segments[i:]))
+
         if current_user.role.name in ['Administrator', 'Operator']:
-            domains = Domain.query.all()
+            domain = Domain.query.filter(
+                Domain.name.in_(candidate_names)
+            ).order_by(db.func.length(Domain.name).desc()).first()
         else:
-            # Get query for domain to which the user has access permission.
-            # This includes direct domain permission AND permission through
-            # account membership
-            domains = db.session.query(Domain) \
+            # Get the longest matching zone the user has access to,
+            # either directly or through an account membership.
+            domain = db.session.query(Domain) \
                 .outerjoin(DomainUser, Domain.id == DomainUser.domain_id) \
                 .outerjoin(Account, Domain.account_id == Account.id) \
                 .outerjoin(AccountUser, Account.id == AccountUser.account_id) \
+                .filter(Domain.name.in_(candidate_names)) \
                 .filter(
-                db.or_(
-                    DomainUser.user_id == current_user.id,
-                    AccountUser.user_id == current_user.id
-                )).all()
+                    db.or_(
+                        DomainUser.user_id == current_user.id,
+                        AccountUser.user_id == current_user.id
+                    )) \
+                .order_by(db.func.length(Domain.name).desc()) \
+                .first()
     except Exception as e:
         current_app.logger.error('DynDNS Error: {0}'.format(e))
         current_app.logger.debug(traceback.format_exc())
         return render_template('dyndns.html', response='911'), 200
-
-    domain = None
-    domain_segments = hostname.split('.')
-    for _index in range(len(domain_segments)):
-        full_domain = '.'.join(domain_segments)
-        potential_domain = Domain.query.filter(
-            Domain.name == full_domain).first()
-        if potential_domain in domains:
-            domain = potential_domain
-            break
-        domain_segments.pop(0)
 
     if not domain:
         history = History(

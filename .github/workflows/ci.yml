@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main, feat-optimizations]
+  pull_request:
+    branches: [master, main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-security:
+    name: Lint & security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # Install only the lint/security tools so this job stays fast
+          # and doesn't pull in libldap/etc. Runtime deps are exercised
+          # by the tests job below.
+          pip install \
+            ruff==0.6.9 \
+            bandit==1.7.10 \
+            pip-audit==2.7.3
+
+      - name: Ruff (lint)
+        # Keep the rule set tight; we're introducing ruff incrementally.
+        # E,F,W (pyflakes/pycodestyle) + B (bugbear) catches real bugs
+        # without forcing a stylistic rewrite of the whole tree.
+        run: ruff check --select E,F,W,B --ignore E501 powerdnsadmin
+
+      - name: Bandit (security)
+        # -ll: report only MEDIUM+ severity findings; LOW is too noisy
+        # for an existing codebase. Tests directory is excluded.
+        run: bandit -r powerdnsadmin -ll -x powerdnsadmin/tests
+
+      - name: pip-audit (CVE scan)
+        # --strict turns warnings into failures; we want CI red on any
+        # known CVE in our pinned dependencies.
+        run: pip-audit --strict -r requirements.txt
+
+  tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install system dependencies
+        # libldap/libsasl needed by python-ldap; libxmlsec1 by python3-saml.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libldap2-dev libsasl2-dev libxmlsec1-dev libxml2-dev \
+            pkg-config build-essential
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Run unit tests
+        # The integration suite needs a live PowerDNS; only run unit tests in CI.
+        run: pytest tests/unit -q

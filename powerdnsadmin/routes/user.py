@@ -164,7 +164,12 @@ def image():
 
     email = current_user.email
     if email and setting.get('gravatar_enabled'):
-        hash_ = hashlib.md5(email.encode('utf-8')).hexdigest()
+        # Gravatar's protocol mandates MD5 of the lowercased email. The hash
+        # is not used as a security primitive; mark it as such so static
+        # analysers (Bandit B324) don't flag it.
+        hash_ = hashlib.md5(
+            email.encode('utf-8'), usedforsecurity=False
+        ).hexdigest()
         url = f'https://s.gravatar.com/avatar/{hash_}?s=100'
         current_app.logger.debug('Redirect user image request to gravatar')
         return redirect(url, 307)

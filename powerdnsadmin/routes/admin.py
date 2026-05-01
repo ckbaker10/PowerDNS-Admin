@@ -424,14 +424,12 @@ def edit_key(key_id=None):
 @operator_role_required
 def manage_keys():
     if request.method == 'GET':
-        try:
-            apikeys = ApiKey.query.all()
-        except Exception as e:
-            current_app.logger.error('Error: {0}'.format(e))
-            abort(500)
-
-        return render_template('admin_manage_keys.html',
-                               keys=apikeys)
+        # The table is rendered empty and populated via AJAX from
+        # ``manage_keys_data`` below. This keeps the initial page load
+        # cheap regardless of the total number of keys (previously the
+        # whole ``ApiKey.query.all()`` set was inlined into the Jinja
+        # template).
+        return render_template('admin_manage_keys.html')
 
     elif request.method == 'POST':
         jdata = request.json
@@ -466,15 +464,155 @@ def manage_keys():
                 }), 200)
 
 
+@admin_bp.route('/manage-keys/data', methods=['GET'])
+@login_required
+@operator_role_required
+def manage_keys_data():
+    """Server-side DataTables endpoint for the API-keys admin table.
+
+    Implements the subset of the DataTables protocol the page actually
+    uses:
+
+    * ``draw`` — echoed back so the client can tie request to response.
+    * ``start`` / ``length`` — offset and page size; ``length=-1``
+      requests "all" and is honoured (no artificial cap).
+    * ``search[value]`` — case-insensitive substring match against
+      ``ApiKey.id`` (cast to text), ``ApiKey.description`` and
+      ``Role.name``.
+    * ``order[0][column]`` / ``order[0][dir]`` — single-column sort on
+      the orderable columns (id, role, description). Domains/Accounts/
+      Actions are not orderable.
+
+    The response carries pre-rendered HTML for the action menu so the
+    template stays declarative and we don't ship key URLs to the client
+    independently. ``selectinload`` on ``ApiKey.domains/accounts`` keeps
+    this O(1) queries per page regardless of page size.
+    """
+    args = request.args
+
+    # --- DataTables bookkeeping ---------------------------------------
+    try:
+        draw = int(args.get('draw', '0'))
+    except (TypeError, ValueError):
+        draw = 0
+    try:
+        start = max(int(args.get('start', '0')), 0)
+    except (TypeError, ValueError):
+        start = 0
+    try:
+        length = int(args.get('length', '10'))
+    except (TypeError, ValueError):
+        length = 10
+    # length == -1 means "all"; cap raw negatives to a sane default.
+    if length < -1:
+        length = 10
+
+    search_value = (args.get('search[value]') or '').strip()
+
+    order_col = args.get('order[0][column]', '0')
+    order_dir = (args.get('order[0][dir]') or 'asc').lower()
+    if order_dir not in ('asc', 'desc'):
+        order_dir = 'asc'
+
+    # Map DataTables column index -> SQLAlchemy expression. Anything not
+    # listed here falls back to ApiKey.id so the response is stable.
+    sort_map = {
+        '0': ApiKey.id,
+        '2': ApiKey.description,
+    }
+    sort_expr = sort_map.get(order_col, ApiKey.id)
+    if order_dir == 'desc':
+        sort_expr = sort_expr.desc()
+
+    base_query = ApiKey.query
+    records_total = base_query.with_entities(db.func.count(ApiKey.id)).scalar()
+
+    filtered_query = base_query
+    if search_value:
+        like = '%{0}%'.format(search_value)
+        # Cast id to text so the substring match works on numeric ids
+        # in both PostgreSQL and SQLite. ``Role`` is joined explicitly
+        # so the role-name filter doesn't depend on relationship lazy
+        # loading semantics.
+        filtered_query = (
+            filtered_query
+            .outerjoin(Role, Role.id == ApiKey.role_id)
+            .filter(db.or_(
+                db.cast(ApiKey.id, db.String).ilike(like),
+                ApiKey.description.ilike(like),
+                Role.name.ilike(like),
+            ))
+        )
+        records_filtered = filtered_query.with_entities(
+            db.func.count(db.distinct(ApiKey.id))
+        ).scalar()
+    else:
+        records_filtered = records_total
+
+    page_query = filtered_query.order_by(sort_expr)
+    if length != -1:
+        page_query = page_query.offset(start).limit(length)
+    elif start:
+        # length=-1 with a non-zero offset is nonsensical; ignore start.
+        pass
+
+    keys = page_query.all()
+
+    edit_label = 'Edit API Key'
+    delete_label = 'Delete API Key'
+    rows = []
+    for key in keys:
+        edit_url = url_for('admin.edit_key', key_id=key.id)
+        # Pre-render the action cell so the JS only has to drop the
+        # string into the table — keeps the client trivial.
+        actions_html = (
+            '<div class="dropdown">'
+            '<button class="btn btn-primary dropdown-toggle" type="button" '
+            'data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">'
+            '<i class="fa-solid fa-bars"></i></button>'
+            '<div class="dropdown-menu">'
+            '<button type="button" class="dropdown-item btn-warning" '
+            'onclick="window.location.href=\'{edit_url}\'">'
+            '<i class="fa-solid fa-edit"></i>&nbsp;{edit_label}</button>'
+            '<div class="dropdown-divider"></div>'
+            '<button type="button" class="dropdown-item btn-secondary '
+            'button_delete" data-key-id="{key_id}">'
+            '<font color="red"><i class="fa-solid fa-trash"></i>&nbsp;'
+            '{delete_label}</font></button>'
+            '</div></div>'
+        ).format(
+            edit_url=edit_url,
+            edit_label=edit_label,
+            delete_label=delete_label,
+            key_id=key.id,
+        )
+        rows.append([
+            key.id,
+            key.role.name if key.role else '',
+            key.description or '',
+            ', '.join(d.name for d in key.domains),
+            ', '.join(a.name for a in key.accounts),
+            actions_html,
+        ])
+
+    return jsonify({
+        'draw': draw,
+        'recordsTotal': records_total or 0,
+        'recordsFiltered': records_filtered or 0,
+        'data': rows,
+    })
+
+
 @admin_bp.route('/manage-user', methods=['GET', 'POST'])
 @login_required
 @operator_role_required
 def manage_user():
     if request.method == 'GET':
         roles = Role.query.all()
-        users = User.query.order_by(User.username).all()
+        # Table body is fetched async from ``manage_user_data`` so the
+        # initial page load is constant-time regardless of how many
+        # users are registered.
         return render_template('admin_manage_user.html',
-                               users=users,
                                roles=roles)
 
     if request.method == 'POST':
@@ -641,6 +779,176 @@ def manage_user():
                     'msg':
                         'There is something wrong, please contact Administrator.'
                 }), 400)
+
+
+@admin_bp.route('/manage-user/data', methods=['GET'])
+@login_required
+@operator_role_required
+def manage_user_data():
+    """Server-side DataTables endpoint for the users admin table.
+
+    Replaces the previous full ``User.query.order_by(...).all()`` render
+    in Jinja. Returns one page at a time with optional substring search
+    against username/firstname/lastname/email/role and ordering on the
+    first five columns.
+
+    Per-row HTML for the role select, revoke button and action menu is
+    rendered server-side. All user-supplied strings go through Jinja's
+    autoescape via ``escape()`` so the table cannot be turned into an
+    XSS sink by an attacker who controls a username or email.
+    """
+    from markupsafe import escape
+
+    args = request.args
+
+    try:
+        draw = int(args.get('draw', '0'))
+    except (TypeError, ValueError):
+        draw = 0
+    try:
+        start = max(int(args.get('start', '0')), 0)
+    except (TypeError, ValueError):
+        start = 0
+    try:
+        length = int(args.get('length', '10'))
+    except (TypeError, ValueError):
+        length = 10
+    if length < -1:
+        length = 10
+
+    search_value = (args.get('search[value]') or '').strip()
+    order_col = args.get('order[0][column]', '0')
+    order_dir = (args.get('order[0][dir]') or 'asc').lower()
+    if order_dir not in ('asc', 'desc'):
+        order_dir = 'asc'
+
+    sort_map = {
+        '0': User.username,
+        '1': User.firstname,
+        '2': User.lastname,
+        '3': User.email,
+    }
+    sort_expr = sort_map.get(order_col, User.username)
+    if order_dir == 'desc':
+        sort_expr = sort_expr.desc()
+
+    base_query = User.query
+    records_total = base_query.with_entities(db.func.count(User.id)).scalar()
+
+    filtered_query = base_query
+    if search_value:
+        like = '%{0}%'.format(search_value)
+        filtered_query = (
+            filtered_query
+            .outerjoin(Role, Role.id == User.role_id)
+            .filter(db.or_(
+                User.username.ilike(like),
+                User.firstname.ilike(like),
+                User.lastname.ilike(like),
+                User.email.ilike(like),
+                Role.name.ilike(like),
+            ))
+        )
+        records_filtered = filtered_query.with_entities(
+            db.func.count(db.distinct(User.id))
+        ).scalar()
+    else:
+        records_filtered = records_total
+
+    page_query = filtered_query.order_by(sort_expr)
+    if length != -1:
+        page_query = page_query.offset(start).limit(length)
+
+    users = page_query.all()
+    roles = Role.query.all()
+
+    is_operator = current_user.role.name == 'Operator'
+    current_username = current_user.username
+
+    rows = []
+    for user in users:
+        # Operators may not edit Administrators; users may not edit
+        # themselves through this UI. These predicates mirror the
+        # original Jinja conditionals exactly.
+        protect_admin = is_operator and user.role and user.role.name == 'Administrator'
+        is_self = user.username == current_username
+        disable_role = is_self or protect_admin
+        disable_revoke = protect_admin
+        disable_actions = protect_admin
+        # The original template rendered a Delete entry whenever the
+        # row was not for the current user OR the operator-vs-admin
+        # guard tripped — keep that exact condition.
+        show_delete = (not is_self) or protect_admin
+
+        username_safe = escape(user.username)
+        options = []
+        for role in roles:
+            selected = ' selected' if user.role and role.id == user.role.id else ''
+            options.append('<option value="{name}"{sel}>{name}</option>'.format(
+                name=escape(role.name), sel=selected))
+        role_select = (
+            '<select id="{username}" class="user_role"{disabled}>{opts}</select>'
+        ).format(
+            username=username_safe,
+            disabled=' disabled' if disable_role else '',
+            opts=''.join(options),
+        )
+
+        revoke_btn = (
+            '<button type="button" class="btn btn-warning button_revoke" '
+            'title="Revoke Privileges" id="{username}"{disabled}>'
+            '<i class="fa-solid fa-link-slash"></i></button>'
+        ).format(
+            username=username_safe,
+            disabled=' disabled' if disable_revoke else '',
+        )
+
+        edit_url = url_for('admin.edit_user', user_username=user.username)
+        delete_block = ''
+        if show_delete:
+            delete_block = (
+                '<div class="dropdown-divider"></div>'
+                '<button type="button" class="dropdown-item btn-secondary '
+                'button_delete" id="{username}">'
+                '<span style="color: red;">'
+                '<i class="fa-solid fa-trash"></i>&nbsp;Delete User</span>'
+                '</button>'
+            ).format(username=username_safe)
+
+        actions = (
+            '<div class="dropdown">'
+            '<button class="btn btn-primary dropdown-toggle" type="button" '
+            'data-toggle="dropdown" aria-haspopup="true" aria-expanded="false"'
+            '{disabled}>'
+            '<i class="fa-solid fa-bars"></i></button>'
+            '<div class="dropdown-menu">'
+            '<button type="button" class="dropdown-item btn-warning" '
+            'onclick="window.location.href=\'{edit_url}\'">'
+            '<i class="fa-solid fa-edit"></i>&nbsp;Edit User</button>'
+            '{delete_block}'
+            '</div></div>'
+        ).format(
+            disabled=' disabled' if disable_actions else '',
+            edit_url=edit_url,
+            delete_block=delete_block,
+        )
+
+        rows.append([
+            str(escape(user.username)),
+            str(escape(user.firstname or '')),
+            str(escape(user.lastname or '')),
+            str(escape(user.email or '')),
+            role_select,
+            revoke_btn,
+            actions,
+        ])
+
+    return jsonify({
+        'draw': draw,
+        'recordsTotal': records_total or 0,
+        'recordsFiltered': records_filtered or 0,
+        'data': rows,
+    })
 
 
 @admin_bp.route('/account/edit/<account_name>', methods=['GET', 'POST'])

@@ -40,6 +40,23 @@ SESSION_TYPE = 'sqlalchemy'
 SQLALCHEMY_DATABASE_URI = 'sqlite:///' + os.path.join(basedir, 'pdns.db')
 SQLALCHEMY_TRACK_MODIFICATIONS = False
 
+# Connection pool tuning. Defaults match SQLAlchemy's stock pool but expose
+# them as env vars so operators can size to their gunicorn worker count
+# without editing code. ``pool_pre_ping`` cheaply reaps connections that
+# the DB has dropped (typical for MySQL ``wait_timeout``).
+SQLALCHEMY_ENGINE_OPTIONS = {
+    'pool_size': int(os.getenv('SQLALCHEMY_POOL_SIZE', '5')),
+    'max_overflow': int(os.getenv('SQLALCHEMY_MAX_OVERFLOW', '10')),
+    'pool_recycle': int(os.getenv('SQLALCHEMY_POOL_RECYCLE', '3600')),
+    'pool_pre_ping': os.getenv('SQLALCHEMY_POOL_PRE_PING', '1').lower()
+                     in ('1', 'true', 'yes'),
+}
+
+# Aggressive caching for fingerprinted Flask-Assets bundles. The
+# generated/* files include a content hash in the filename, so a
+# one-year max-age is safe.
+SEND_FILE_MAX_AGE_DEFAULT = int(os.getenv('SEND_FILE_MAX_AGE_DEFAULT', '31536000'))
+
 # Number of trusted reverse-proxy hops in front of the app. Set to 0 (default)
 # when the app is exposed directly; raise it when behind a known proxy chain.
 # Keeping this at 0 prevents X-Forwarded-* spoofing from untrusted clients.

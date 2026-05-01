@@ -2,9 +2,47 @@ import sys
 import traceback
 import pytimeparse
 from ast import literal_eval
-from flask import current_app
+from flask import current_app, g, has_request_context
 from .base import db
 from powerdnsadmin.lib.settings import AppSettings
+
+
+_REQUEST_CACHE_KEY = '_pda_settings_cache'
+
+
+def _get_request_cache():
+    """Return the per-request settings cache (a dict).
+
+    Settings are read dozens of times per request (api_url, api_key,
+    timeouts, verify_ssl, ...). Each ``Setting().get()`` call hits the
+    DB. Caching them on ``flask.g`` for the life of one request removes
+    that hot path completely. The cache is a dict keyed by setting name
+    and is populated lazily on first ``get()``. Any ``set()``/``toggle()``
+    invalidates the affected key so writes during the same request are
+    visible.
+
+    Outside a request context (CLI, ``flask db upgrade``, tests), this
+    returns ``None`` and ``Setting.get()`` falls back to a direct query.
+    """
+    if not has_request_context():
+        return None
+    cache = g.get(_REQUEST_CACHE_KEY, None)
+    if cache is None:
+        cache = {}
+        setattr(g, _REQUEST_CACHE_KEY, cache)
+    return cache
+
+
+def _invalidate_request_cache(*setting_names):
+    cache = _get_request_cache()
+    if cache is None:
+        return
+    if not setting_names:
+        cache.clear()
+        return
+    for name in setting_names:
+        cache.pop(name, None)
+
 
 
 class Setting(db.Model):
@@ -41,6 +79,7 @@ class Setting(db.Model):
             if maintenance.value != mode:
                 maintenance.value = mode
                 db.session.commit()
+            _invalidate_request_cache('maintenance')
             return True
         except Exception as e:
             current_app.logger.error('Cannot set maintenance to {0}. DETAIL: {1}'.format(
@@ -63,6 +102,7 @@ class Setting(db.Model):
             else:
                 current_setting.value = "True"
             db.session.commit()
+            _invalidate_request_cache(setting)
             return True
         except Exception as e:
             current_app.logger.error('Cannot toggle setting {0}. DETAIL: {1}'.format(
@@ -87,6 +127,7 @@ class Setting(db.Model):
         try:
             current_setting.value = value
             db.session.commit()
+            _invalidate_request_cache(setting)
             return True
         except Exception as e:
             current_app.logger.error('Cannot edit setting {0}. DETAIL: {1}'.format(setting, e))
@@ -96,6 +137,10 @@ class Setting(db.Model):
 
     def get(self, setting):
         if setting in AppSettings.defaults:
+
+            cache = _get_request_cache()
+            if cache is not None and setting in cache:
+                return cache[setting]
 
             if setting.upper() in current_app.config:
                 result = current_app.config[setting.upper()]
@@ -117,6 +162,9 @@ class Setting(db.Model):
                     value = max(int(value or 0), 5)
                 except (TypeError, ValueError):
                     value = 30
+
+            if cache is not None:
+                cache[setting] = value
             return value
         else:
             current_app.logger.error('Unknown setting queried: {0}'.format(setting))
