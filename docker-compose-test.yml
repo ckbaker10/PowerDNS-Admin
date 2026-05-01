@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   powerdns-admin:
     image: powerdns-admin-test

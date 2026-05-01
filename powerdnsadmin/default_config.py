@@ -44,13 +44,21 @@ SQLALCHEMY_TRACK_MODIFICATIONS = False
 # them as env vars so operators can size to their gunicorn worker count
 # without editing code. ``pool_pre_ping`` cheaply reaps connections that
 # the DB has dropped (typical for MySQL ``wait_timeout``).
+#
+# SQLite uses NullPool by default and rejects ``pool_size`` /
+# ``max_overflow`` (TypeError from create_engine). Skip those two keys
+# when the configured URI points at SQLite — applies to the default
+# dev DB and the asset-build step in the Docker image.
 SQLALCHEMY_ENGINE_OPTIONS = {
-    'pool_size': int(os.getenv('SQLALCHEMY_POOL_SIZE', '5')),
-    'max_overflow': int(os.getenv('SQLALCHEMY_MAX_OVERFLOW', '10')),
     'pool_recycle': int(os.getenv('SQLALCHEMY_POOL_RECYCLE', '3600')),
     'pool_pre_ping': os.getenv('SQLALCHEMY_POOL_PRE_PING', '1').lower()
                      in ('1', 'true', 'yes'),
 }
+if not SQLALCHEMY_DATABASE_URI.startswith('sqlite'):
+    SQLALCHEMY_ENGINE_OPTIONS['pool_size'] = int(
+        os.getenv('SQLALCHEMY_POOL_SIZE', '5'))
+    SQLALCHEMY_ENGINE_OPTIONS['max_overflow'] = int(
+        os.getenv('SQLALCHEMY_MAX_OVERFLOW', '10'))
 
 # Aggressive caching for fingerprinted Flask-Assets bundles. The
 # generated/* files include a content hash in the filename, so a

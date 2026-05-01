@@ -115,9 +115,11 @@ docker-compose*
 .venv/
 venv/
 env/
-tests/
 docs/
-docker-test/
+# tests/ and docker-test/ are needed by docker-compose-test.yml. They
+# are not copied by the production image because docker/Dockerfile only
+# `cp`s migrations/, powerdnsadmin/, run.py and the docker entrypoint,
+# so leaving them in the context costs nothing for the prod build.
 *.md
 .env
 .env.*

@@ -91,6 +91,12 @@ def initial_data(app):
         try:
             from flask_migrate import upgrade as flask_migrate_upgrade
             flask_migrate_upgrade(directory="migrations")
+            # Module-scoped fixtures unlink the SQLite file on teardown,
+            # so the sessions table created at app startup is gone after
+            # the first module finishes. Recreate it here so subsequent
+            # modules can authenticate.
+            if app.config.get('SESSION_TYPE') == 'sqlalchemy':
+                app.session_interface.db.create_all()
             db.session.add(api_url_setting)
             db.session.add(api_key_setting)
             db.session.add(allow_create_domain_setting)
@@ -140,6 +146,10 @@ def initial_apikey_data(app):
         try:
             from flask_migrate import upgrade as flask_migrate_upgrade
             flask_migrate_upgrade(directory="migrations")
+            # See note in initial_data: the sessions table needs to be
+            # rebuilt every time the SQLite file is recreated.
+            if app.config.get('SESSION_TYPE') == 'sqlalchemy':
+                app.session_interface.db.create_all()
             db.session.add(api_url_setting)
             db.session.add(api_key_setting)
             db.session.add(allow_create_domain_setting)

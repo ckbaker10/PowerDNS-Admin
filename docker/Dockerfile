@@ -34,22 +34,33 @@ COPY ./requirements.txt /build/requirements.txt
 # network access and no toolchain are needed at install time. This
 # also pre-bakes binary wheels for python-ldap, lxml, psycopg2, etc.,
 # so the runtime image only has to ship the matching shared libraries.
-RUN pip install --no-cache-dir --upgrade pip wheel && \
+#
+# --break-system-packages: Alpine 3.20 ships a PEP 668 marker that
+# blocks system-pip writes. We're inside a single-purpose container,
+# not a shared OS, so installing into the system site-packages is the
+# intended behaviour; a venv would just add a layer of indirection.
+RUN pip install --break-system-packages --no-cache-dir --upgrade pip wheel && \
     mkdir -p /wheels && \
     pip wheel --no-cache-dir --wheel-dir=/wheels -r requirements.txt
 
 # Install the wheels locally so ``flask assets build`` below can run
 # against the resolved dependency set during the build stage.
-RUN pip install --no-cache-dir --no-index --find-links=/wheels -r requirements.txt
+RUN pip install --break-system-packages --no-cache-dir --no-index --find-links=/wheels -r requirements.txt
 
 # Add sources
 COPY . /build
 
 # Prepare assets
-RUN yarn install --pure-lockfile --production && \
+# PDA_ALLOW_INSECURE_SECRET_KEY: ``flask assets build`` instantiates
+# the app via create_app(), which refuses to start with the shipped
+# placeholder SECRET_KEY. Asset compilation never serves traffic and
+# never signs a token, so the check is bypassed only for this build
+# step. The runtime stage still enforces it.
+RUN PDA_ALLOW_INSECURE_SECRET_KEY=1 \
+    yarn install --pure-lockfile --production && \
     yarn cache clean && \
     sed -i -r -e "s|'rcssmin',\s?'cssrewrite'|'rcssmin'|g" /build/powerdnsadmin/assets.py && \
-    flask assets build
+    PDA_ALLOW_INSECURE_SECRET_KEY=1 flask assets build
 
 RUN mv /build/powerdnsadmin/static /tmp/static && \
     mkdir /build/powerdnsadmin/static && \
@@ -104,7 +115,7 @@ RUN apk add --no-cache \
 # silently downgrade CVE fixes for gunicorn, requests, etc.
 COPY --from=builder /wheels /wheels
 COPY --from=builder /build/requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir --no-index --find-links=/wheels \
+RUN pip install --break-system-packages --no-cache-dir --no-index --find-links=/wheels \
         -r /tmp/requirements.txt && \
     rm -rf /wheels /tmp/requirements.txt /root/.cache
 

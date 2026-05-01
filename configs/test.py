@@ -2,6 +2,10 @@ import os
 basedir = os.path.abspath(os.path.dirname(__file__))
 
 ### BASIC APP CONFIG
+# TESTING=True flips Flask into test mode AND tells create_app() to
+# skip the SECRET_KEY default-value guard, so the public placeholder
+# values below are accepted only under this config.
+TESTING = True
 SALT = '$2b$12$yLUMTIfl21FKJQpTkRQXCu'
 SECRET_KEY = 'e951e5a1f4b94151b360f47edf596dd2'
 BIND_ADDRESS = '0.0.0.0'

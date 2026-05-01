@@ -116,9 +116,15 @@ def create_app(config=None):
 
     sess = Session(app)
 
-    # create sessions table if using sqlalchemy backend
-    if os.environ.get('SESSION_TYPE') == 'sqlalchemy':
-        sess.app.session_interface.db.create_all()
+    # create sessions table if using sqlalchemy backend. Read from
+    # app.config (not os.environ) so the table is also created when
+    # SESSION_TYPE is supplied via the config file rather than an env
+    # var — otherwise the integration test image (and any deployment
+    # that relies on default_config.SESSION_TYPE) ends up without the
+    # 'sessions' table and every authenticated request 500s.
+    if app.config.get('SESSION_TYPE') == 'sqlalchemy':
+        with app.app_context():
+            sess.app.session_interface.db.create_all()
 
     # SMTP
     app.mail = Mail(app)
