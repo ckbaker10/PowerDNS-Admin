@@ -1066,7 +1066,7 @@ def dyndns_update():
                 if result['status'] == 'ok':
                     history = History(
                         msg=
-                        'DynDNS update: created record {0} in zone {1} successfully'
+                        'DynDNS update: created record {0} ({2}) in zone {1} successfully'
                         .format(hostname, domain.name, str(ip)),
                         detail=json.dumps({
                             'domain': domain.name,
