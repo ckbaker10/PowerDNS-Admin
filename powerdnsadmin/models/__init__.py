@@ -9,6 +9,7 @@ from .server import Server
 from .history import History
 from .api_key import ApiKey
 from .api_key_account import ApiKeyAccount
+from .api_key_rrset_acl import ApiKeyRrsetAcl
 from .setting import Setting
 from .domain import Domain
 from .domain_setting import DomainSetting

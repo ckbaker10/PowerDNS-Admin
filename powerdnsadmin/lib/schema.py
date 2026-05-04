@@ -48,11 +48,21 @@ class ApiKeySummarySchema(Schema):
     description = fields.String()
 
 
+class ApiKeyRrsetAclSchema(Schema):
+    id = fields.Integer()
+    domain = fields.Nested(DomainSchema)
+    record_name_pattern = fields.String()
+    record_type = fields.String()
+    allow_replace = fields.Boolean()
+    allow_delete = fields.Boolean()
+
+
 class ApiKeySchema(Schema):
     id = fields.Integer()
     role = fields.Nested(RoleSchema)
     domains = fields.Nested(DomainSchema, many=True)
     accounts = fields.Nested(AccountSummarySchema, many=True)
+    rrset_acls = fields.Nested(ApiKeyRrsetAclSchema, many=True)
     description = fields.String()
     key = fields.String()
 
@@ -62,6 +72,7 @@ class ApiPlainKeySchema(Schema):
     role = fields.Nested(RoleSchema)
     domains = fields.Nested(DomainSchema, many=True)
     accounts = fields.Nested(AccountSummarySchema, many=True)
+    rrset_acls = fields.Nested(ApiKeyRrsetAclSchema, many=True)
     description = fields.String()
     plain_key = fields.String()
 

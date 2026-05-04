@@ -27,6 +27,10 @@ class ApiKey(db.Model):
                                secondary="apikey_account",
                                back_populates="apikeys",
                                lazy="selectin")
+    rrset_acls = db.relationship("ApiKeyRrsetAcl",
+                                 back_populates="apikey",
+                                 cascade="all, delete-orphan",
+                                 lazy=True)
 
     def __init__(self, key=None, desc=None, role_name=None, domains=[], accounts=[]):
         self.id = None
@@ -91,6 +95,22 @@ class ApiKey(db.Model):
           current_app.logger.error(msg_str.format(e))
           db.session.rollback()  # fixed line
           raise e
+
+    def replace_rrset_acls(self, new_rows):
+        """Atomically replace the key's rrset_acl rows."""
+        try:
+            self.rrset_acls.clear()
+            db.session.flush()
+            for row in new_rows:
+                row.apikey_id = self.id
+                self.rrset_acls.append(row)
+            db.session.commit()
+        except Exception as e:
+            current_app.logger.error(
+                'Failed to replace rrset_acls for apikey {0}: {1}'
+                .format(self.id, e))
+            db.session.rollback()
+            raise
 
     def get_hashed_password(self, plain_text_password=None):
         # Hash a password for the first time

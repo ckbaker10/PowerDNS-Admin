@@ -22,6 +22,7 @@ A PowerDNS web interface with advanced features.
 - DynDNS 2 protocol support
 - Easy IPv6 PTR record editing
 - Provides an API for zone and record management among other features
+- Provides record-scoped API keys for fine-grained automation (e.g. certbot DNS-01)
 - Provides full IDN/Punycode support
 
 ## [Project Update - PLEASE READ!!!](https://github.com/PowerDNS-Admin/PowerDNS-Admin/discussions/1708)
@@ -73,6 +74,69 @@ You can then access PowerDNS-Admin by pointing your browser to http://localhost:
 ## Screenshots
 
 ![dashboard](docs/screenshots/dashboard.png)
+
+## Record-scoped API keys (certbot DNS-01)
+
+PowerDNS-Admin can mint API keys that are restricted to specific RRsets within
+a zone. These keys may only PATCH the rrsets that match their ACL rules; any
+other rrset, and any zone-level write (POST/PUT/DELETE), is rejected before
+the request reaches PowerDNS. Read access is still scoped to the key's zones
+via the existing zone-level authorisation.
+
+The intended use case is automated certificate issuance: the
+[certbot-dns-pdns](https://github.com/kaechele/certbot-dns-pdns) plugin speaks
+the standard PowerDNS HTTP API. Pointing it at PowerDNS-Admin's `/api/v1`
+proxy with a record-scoped key restricts a renewal job to the single
+`_acme-challenge.<host>` TXT rrset it actually needs to update. PowerDNS
+itself does not need to be reachable from the certbot host.
+
+### Creating a scoped key
+
+Open *Admin -> API Keys -> Create Key* (or click the *Let's Encrypt Key*
+button on a zone page for a one-click prefilled form). In the *Restrict to
+Specific Records* section, add a row per RRset the key should be allowed to
+modify:
+
+| Zone | Name pattern | Type | REPLACE | DELETE |
+|------|--------------|------|---------|--------|
+| example.com | `_acme-challenge.host.example.com.` | TXT | yes | yes |
+
+Patterns are exact FQDNs or use a single `*` as a complete label
+(`_acme-challenge.*.example.com.` matches one label).
+
+### Permissions
+
+| Caller role | Unscoped key | Scoped key | Allowed scopes |
+|-------------|--------------|------------|----------------|
+| Administrator | yes | yes | any zone, any record name, any type |
+| Operator | yes | yes | any zone, any record name, any type |
+| User (zone owner) | no | yes | only zones they own; only TXT by default |
+
+The User-role behaviour is gated by the `allow_user_create_scoped_apikey`
+setting (default on) under *Admin -> Settings -> Basic*.
+
+### certbot setup
+
+Install the plugin and create a credentials file (chmod 600):
+
+```ini
+# /etc/letsencrypt/pdns-credentials.ini
+dns_pdns_endpoint   = https://pdnsadmin.example.com
+dns_pdns_api_key    = <scoped-key from PowerDNS-Admin UI>
+dns_pdns_server_id  = localhost
+```
+
+Then request a certificate:
+
+```bash
+certbot certonly \
+  --authenticator dns-pdns \
+  --dns-pdns-credentials /etc/letsencrypt/pdns-credentials.ini \
+  -d host.example.com
+```
+
+The key may only touch `_acme-challenge.host.example.com./TXT`. A
+compromised credential cannot be used to alter any other record.
 
 ## Support
 

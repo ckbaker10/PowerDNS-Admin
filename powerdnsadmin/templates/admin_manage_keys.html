@@ -45,6 +45,7 @@
                             <th>Description</th>
                             <th>Zones</th>
                             <th>Accounts</th>
+                            <th>Scoped</th>
                             <th>Actions</th>
                         </tr>
                         </thead>
@@ -84,8 +85,8 @@
             "pageLength": 10,
             "order": [[0, "desc"]],
             "columnDefs": [
-                // Domains, Accounts and Actions are not orderable.
-                {"orderable": false, "targets": [3, 4, 5]}
+                // Zones, Accounts, Scoped and Actions are not orderable.
+                {"orderable": false, "targets": [3, 4, 5, 6]}
             ]
         });
 

@@ -13,6 +13,7 @@ from ..decorators import (
     apikey_can_create_domain, apikey_can_remove_domain,
     apikey_is_admin, apikey_can_access_domain, apikey_can_configure_dnssec,
     api_role_can, apikey_or_basic_auth,
+    apikey_rrset_acl_enforced,
     callback_if_request_body_contains_key, allowed_record_types, allowed_record_ttl
 )
 from ..lib import utils, helper
@@ -23,7 +24,8 @@ from ..lib.errors import (
     AccountCreateFail, AccountUpdateFail, AccountDeleteFail,
     AccountCreateDuplicate, AccountNotExists,
     UserCreateFail, UserCreateDuplicate, UserUpdateFail, UserDeleteFail,
-    UserUpdateFailEmail, InvalidAccountNameException
+    UserUpdateFailEmail, InvalidAccountNameException,
+    RrsetAclForbidden,
 )
 from ..lib.schema import (
     ApiKeySchema, DomainSchema, ApiPlainKeySchema, UserSchema, AccountSchema,
@@ -31,7 +33,7 @@ from ..lib.schema import (
 )
 from ..models import (
     User, Domain, DomainUser, Account, AccountUser, History, Setting, ApiKey,
-    Role,
+    ApiKeyRrsetAcl, Role,
 )
 from ..models.base import db
 
@@ -144,6 +146,11 @@ def handle_domain_already_exists(err):
 
 @api_bp.errorhandler(DomainAccessForbidden)
 def handle_domain_access_forbidden(err):
+    return jsonify(err.to_dict()), err.status_code
+
+
+@api_bp.errorhandler(RrsetAclForbidden)
+def handle_rrset_acl_forbidden(err):
     return jsonify(err.to_dict()), err.status_code
 
 
@@ -310,6 +317,91 @@ def api_login_delete_zone(domain_name):
     return resp.content, resp.status_code, resp.headers.items()
 
 
+def _scoped_keys_allowed_for(user):
+    """Honour the global ``allow_user_create_scoped_apikey`` setting.
+    Administrators/Operators are not affected.
+    """
+    if user.role.name in ('Administrator', 'Operator'):
+        return True
+    setting_value = Setting().get('allow_user_create_scoped_apikey')
+    if setting_value is None:
+        return True
+    if isinstance(setting_value, bool):
+        return setting_value
+    return str(setting_value).lower() in ('1', 'true', 'yes', 'on')
+
+
+def _build_rrset_acl_rows(rrset_acl_input, allowed_domains, is_privileged):
+    """Validate and materialise ApiKeyRrsetAcl rows from the JSON payload.
+
+    ``allowed_domains`` is the resolved list of Domain ORM objects the key
+    will be granted (used as the universe of permitted ACL zones for
+    non-privileged callers and as a fallback domain lookup).
+    """
+    from ..lib.rrset_acl import (
+        validate_pattern_syntax, pattern_within_zone,
+    )
+
+    out = []
+    allowed_domain_names = {d.name for d in (allowed_domains or [])}
+    domain_cache = {d.name: d for d in (allowed_domains or [])}
+
+    for entry in rrset_acl_input:
+        if not isinstance(entry, dict):
+            raise NotEnoughPrivileges(message='rrset_acl entry must be object')
+        zone_name = entry.get('domain') or entry.get('zone')
+        name = entry.get('name')
+        rtype = (entry.get('type') or 'TXT').upper()
+        allow_replace = entry.get('allow_replace', True)
+        allow_delete = entry.get('allow_delete', True)
+
+        if not zone_name or not name:
+            raise NotEnoughPrivileges(
+                message='rrset_acl entry needs `domain` and `name`')
+
+        # Privileged callers may target any zone; others must stick to the
+        # zones they granted to the key (which were already verified to be
+        # zones they own further up).
+        if not is_privileged and zone_name not in allowed_domain_names:
+            raise DomainAccessForbidden(
+                message='rrset_acl zone {0!r} not in api key zones'
+                        .format(zone_name))
+
+        # Defence-in-depth: non-Administrators cannot mint keys for
+        # non-TXT records via this flow.
+        if rtype != 'TXT' and current_user.role.name != 'Administrator':
+            raise NotEnoughPrivileges(
+                message='Only TXT rrset_acl entries may be created by '
+                        'non-Administrator users.')
+
+        ok, reason = validate_pattern_syntax(name)
+        if not ok:
+            raise NotEnoughPrivileges(
+                message='Invalid rrset_acl pattern: ' + reason)
+        if not pattern_within_zone(name, zone_name):
+            raise NotEnoughPrivileges(
+                message='Pattern {0!r} not inside zone {1!r}'
+                        .format(name, zone_name))
+
+        domain_obj = domain_cache.get(zone_name)
+        if domain_obj is None:
+            domain_obj = Domain.query.filter(Domain.name == zone_name).first()
+            if domain_obj is None:
+                raise DomainNotExists(
+                    message='rrset_acl zone {0!r} does not exist'
+                            .format(zone_name))
+            domain_cache[zone_name] = domain_obj
+
+        out.append(ApiKeyRrsetAcl(
+            domain_id=domain_obj.id,
+            record_name_pattern=name,
+            record_type=rtype,
+            allow_replace=allow_replace,
+            allow_delete=allow_delete,
+        ))
+    return out
+
+
 @api_bp.route('/pdnsadmin/apikeys', methods=['POST'])
 @api_basic_auth
 @csrf.exempt
@@ -398,8 +490,38 @@ def api_generate_apikey():
                     domains=domain_obj_list,
                     accounts=account_obj_list)
 
+    # ----- rrset acl (record-scoped key) -----
+    rrset_acl_input = data.get('rrset_acl') or []
+    if not isinstance(rrset_acl_input, list):
+        abort(400)
+
+    is_privileged = current_user.role.name in ['Administrator', 'Operator']
+
+    # Non-privileged callers may only mint scoped keys.
+    if not is_privileged and len(rrset_acl_input) == 0:
+        msg = ("Users may only create record-scoped api keys "
+               "(rrset_acl required).")
+        current_app.logger.error(msg)
+        raise NotEnoughPrivileges(message=msg)
+
+    if rrset_acl_input and not _scoped_keys_allowed_for(current_user):
+        msg = "Creation of record-scoped api keys is disabled for your role."
+        current_app.logger.error(msg)
+        raise NotEnoughPrivileges(message=msg)
+
+    acl_rows = _build_rrset_acl_rows(
+        rrset_acl_input,
+        allowed_domains=domain_obj_list,
+        is_privileged=is_privileged,
+    )
+
     try:
         apikey.create()
+        for row in acl_rows:
+            row.apikey_id = apikey.id
+            db.session.add(row)
+        if acl_rows:
+            db.session.commit()
     except Exception as e:
         current_app.logger.error('Error: {0}'.format(e))
         raise ApiKeyCreateFail(message='Api key create failed')
@@ -683,6 +805,29 @@ def api_update_apikey(apikey_id):
     except Exception as e:
         current_app.logger.error('Error: {0}'.format(e))
         abort(500)
+
+    if 'rrset_acl' in data:
+        if not isinstance(data['rrset_acl'], list):
+            abort(400)
+        is_privileged = current_user.role.name in ['Administrator', 'Operator']
+        if data['rrset_acl'] and not _scoped_keys_allowed_for(current_user):
+            raise NotEnoughPrivileges(
+                message='Creation of record-scoped api keys is disabled '
+                        'for your role.')
+        # Reload the key so its `domains` reflects any update above.
+        db.session.refresh(apikey)
+        try:
+            new_rows = _build_rrset_acl_rows(
+                data['rrset_acl'],
+                allowed_domains=list(apikey.domains),
+                is_privileged=is_privileged,
+            )
+            apikey.replace_rrset_acls(new_rows)
+        except StructuredException:
+            raise
+        except Exception as e:
+            current_app.logger.error('rrset_acl update failed: {0}'.format(e))
+            abort(500)
 
     return '', 204
 
@@ -1124,6 +1269,7 @@ def api_zone_cryptokey(server_id, zone_id, cryptokey_id):
     methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'])
 @apikey_auth
 @apikey_can_access_domain
+@apikey_rrset_acl_enforced
 @csrf.exempt
 def api_zone_subpath_forward(server_id, zone_id, subpath):
     resp = helper.forward_request()
@@ -1136,6 +1282,7 @@ def api_zone_subpath_forward(server_id, zone_id, subpath):
 @allowed_record_types
 @allowed_record_ttl
 @apikey_can_access_domain
+@apikey_rrset_acl_enforced
 @apikey_can_remove_domain(http_methods=['DELETE'])
 @callback_if_request_body_contains_key(apikey_can_configure_dnssec()(),
                                        http_methods=['PUT'],
@@ -1153,13 +1300,25 @@ def api_zone_forward(server_id, zone_id):
         if Setting().get('enable_api_rr_history'):
             if request.method in ['POST', 'PATCH']:
                 data = request.get_json(force=True)
+                rrsets = data.get('rrsets', []) if isinstance(data, dict) else []
+                detail = {
+                    'domain': zone_id.rstrip('.'),
+                    'add_rrsets': list(filter(
+                        lambda r: r.get('changetype') == "REPLACE", rrsets)),
+                    'del_rrsets': list(filter(
+                        lambda r: r.get('changetype') == "DELETE", rrsets)),
+                }
+                apikey = getattr(g, 'apikey', None)
+                if apikey is not None:
+                    detail['apikey_id'] = apikey.id
+                    if getattr(apikey, 'rrset_acls', None):
+                        detail['apikey_scoped'] = True
+                        detail['apikey_rrset_names'] = sorted({
+                            r.get('name', '') for r in rrsets
+                        })
                 history = History(
                     msg='Apply record changes to zone {0}'.format(zone_id.rstrip('.')),
-                    detail = json.dumps({
-                        'domain': zone_id.rstrip('.'),
-                        'add_rrsets': list(filter(lambda r: r['changetype'] == "REPLACE", data['rrsets'])),
-                        'del_rrsets': list(filter(lambda r: r['changetype'] == "DELETE", data['rrsets']))
-                    }),
+                    detail=json.dumps(detail),
                     created_by=created_by_value,
                     domain_id=Domain().get_id_by_name(zone_id.rstrip('.')))
                 history.add()

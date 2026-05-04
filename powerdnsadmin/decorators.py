@@ -6,7 +6,8 @@ from flask_login import current_user
 
 from .models import User, ApiKey, Domain, Setting
 from .lib.errors import RequestIsNotJSON, NotEnoughPrivileges, RecordTTLNotAllowed, RecordTypeNotAllowed
-from .lib.errors import DomainAccessForbidden, DomainOverrideForbidden
+from .lib.errors import DomainAccessForbidden, DomainOverrideForbidden, RrsetAclForbidden
+from .lib.rrset_acl import evaluate_patch, rules_from_apikey
 
 
 def admin_role_required(f):
@@ -531,5 +532,59 @@ def apikey_or_basic_auth(f):
             return apikey_auth(f)(*args, **kwargs)
         else:
             return api_basic_auth(f)(*args, **kwargs)
+
+    return decorated_function
+
+
+def apikey_rrset_acl_enforced(f):
+    """Enforce per-record ACL on the zone-proxy endpoints.
+
+    Behaviour:
+      * ApiKey with no rrset_acl rows  -> no-op (current behaviour).
+      * GET                            -> allowed (the key is already
+                                          zone-scoped by ``apikey_can_access_domain``).
+      * PATCH                          -> body's rrsets[] validated against
+                                          the key's ACL. Atomic: a single
+                                          forbidden rrset rejects the whole
+                                          request.
+      * Any other write method on the  -> 403. A record-scoped key must
+        zone object (POST/PUT/DELETE)     never recreate or delete the zone.
+    """
+
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        apikey = getattr(g, 'apikey', None)
+        if apikey is None or not getattr(apikey, 'rrset_acls', None):
+            return f(*args, **kwargs)
+
+        method = request.method.upper()
+        if method == 'GET':
+            return f(*args, **kwargs)
+
+        zone_id = kwargs.get('zone_id', '')
+
+        if method != 'PATCH':
+            current_app.logger.warning(
+                'Scoped apikey {0} attempted {1} on zone {2} - denied'
+                .format(apikey.id, method, zone_id))
+            raise RrsetAclForbidden(
+                message='Scoped api key may only PATCH rrsets')
+
+        try:
+            body = request.get_json(force=True, silent=False) or {}
+        except Exception as e:
+            current_app.logger.warning(
+                'Scoped apikey {0} sent non-JSON PATCH body: {1}'
+                .format(apikey.id, e))
+            raise RrsetAclForbidden(message='PATCH body must be JSON')
+
+        ok, reason = evaluate_patch(rules_from_apikey(apikey), zone_id, body)
+        if not ok:
+            current_app.logger.warning(
+                'Scoped apikey {0} PATCH on zone {1} denied: {2}'
+                .format(apikey.id, zone_id, reason))
+            raise RrsetAclForbidden(message=reason)
+
+        return f(*args, **kwargs)
 
     return decorated_function
