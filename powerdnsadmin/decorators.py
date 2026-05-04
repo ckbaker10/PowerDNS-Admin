@@ -376,7 +376,10 @@ def apikey_can_access_domain(f):
     """
     Grant access if:
         - user has Operator role or higher, or
-        - user has explicitly been granted access to domain
+        - user has explicitly been granted access to domain, or
+        - user has a record-scoped (rrset ACL) key that covers the zone
+          (the rrset ACL enforcer, which runs after this decorator, will
+          then gate individual write operations)
     """
 
     @wraps(f)
@@ -391,7 +394,28 @@ def apikey_can_access_domain(f):
             allowed_domains = set(domain_names + accounts_domains)
 
             if zone_id not in allowed_domains:
-                raise DomainAccessForbidden()
+                # Allow through if the key has rrset ACL rows for this zone.
+                # The apikey_rrset_acl_enforced decorator will restrict writes
+                # to the permitted records; reads are always allowed so the
+                # certbot plugin can discover the zone.
+                rrset_acl_zones = {
+                    acl.domain.name
+                    for acl in (getattr(g.apikey, 'rrset_acls', None) or [])
+                    if acl.domain
+                }
+                if zone_id not in rrset_acl_zones:
+                    # Also allow subdomains of rrset_acl zones so the
+                    # certbot plugin can probe the zone tree (it walks up
+                    # from the hostname until it gets a 404→200 hit on the
+                    # actual zone name).  PowerDNS returns 404 for names
+                    # that aren't real zones; writes are still gated by the
+                    # rrset ACL enforcer further down the decorator chain.
+                    allowed_by_rrset = any(
+                        zone_id.endswith('.' + z)
+                        for z in rrset_acl_zones
+                    )
+                    if not allowed_by_rrset:
+                        raise DomainAccessForbidden()
         return f(*args, **kwargs)
 
     return decorated_function

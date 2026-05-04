@@ -117,14 +117,44 @@ setting (default on) under *Admin -> Settings -> Basic*.
 
 ### certbot setup
 
-Install the plugin and create a credentials file (chmod 600):
+Install the `certbot-dns-pdns` plugin on the machine that runs certbot:
+
+```bash
+# pip / virtualenv
+pip install certbot-dns-pdns
+
+# snap (most common on Ubuntu 20.04+)
+sudo snap install certbot-dns-pdns
+sudo snap connect certbot:plugin certbot-dns-pdns
+
+# Debian / Ubuntu apt
+sudo apt install python3-certbot-dns-pdns
+```
+
+Verify the plugin is registered:
+
+```bash
+certbot plugins   # should list: dns-pdns
+```
+
+Create a credentials file and lock its permissions:
+
+```bash
+chmod 600 /etc/letsencrypt/pdns-credentials.ini
+```
 
 ```ini
 # /etc/letsencrypt/pdns-credentials.ini
-dns_pdns_endpoint   = https://pdnsadmin.example.com
-dns_pdns_api_key    = <scoped-key from PowerDNS-Admin UI>
-dns_pdns_server_id  = localhost
+dns_pdns_endpoint        = https://pdnsadmin.example.com
+dns_pdns_api_key         = <scoped-key from PowerDNS-Admin UI>
+dns_pdns_server_id       = localhost
+dns_pdns_disable_notify  = true
 ```
+
+> `dns_pdns_disable_notify` suppresses secondary-nameserver notifications after the
+> challenge record is written. Set to `true` for a single authoritative server, `false`
+> if you want secondaries notified. The property is required — omitting it causes certbot
+> to abort with "Missing property".
 
 Then request a certificate:
 
@@ -134,6 +164,11 @@ certbot certonly \
   --dns-pdns-credentials /etc/letsencrypt/pdns-credentials.ini \
   -d host.example.com
 ```
+
+> **Note:** `-d` is the domain you want the **certificate for** (e.g. `host.example.com`).
+> Do **not** pass the `_acme-challenge` subdomain — the plugin creates that TXT record
+> automatically. Passing `_acme-challenge.host.example.com` will cause Let's Encrypt to
+> reject the request with "Domain name contains an invalid character".
 
 The key may only touch `_acme-challenge.host.example.com./TXT`. A
 compromised credential cannot be used to alter any other record.
