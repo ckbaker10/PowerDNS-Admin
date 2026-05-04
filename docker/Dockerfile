@@ -62,24 +62,21 @@ RUN PDA_ALLOW_INSECURE_SECRET_KEY=1 \
     sed -i -r -e "s|'rcssmin',\s?'cssrewrite'|'rcssmin'|g" /build/powerdnsadmin/assets.py && \
     PDA_ALLOW_INSECURE_SECRET_KEY=1 flask assets build
 
-RUN mv /build/powerdnsadmin/static /tmp/static && \
+# Stage the original static tree under /build (not /tmp): on newer
+# Docker BuildKit /tmp is mount-namespaced per RUN, so a `mv` into
+# /tmp drops the data when the layer is committed and the next RUN
+# starts in a fresh sandbox where /bin/sh lookups fail.
+RUN mv /build/powerdnsadmin/static /build/static_orig && \
     mkdir /build/powerdnsadmin/static && \
-    cp -r /tmp/static/generated /build/powerdnsadmin/static && \
-    cp -r /tmp/static/assets /build/powerdnsadmin/static && \
-    cp -r /tmp/static/img /build/powerdnsadmin/static && \
-    find /tmp/static/node_modules -name 'webfonts' -exec cp -r {} /build/powerdnsadmin/static \; && \
-    find /tmp/static/node_modules -name 'fonts' -exec cp -r {} /build/powerdnsadmin/static \; && \
-    find /tmp/static/node_modules/icheck/skins/square -name '*.png' -exec cp {} /build/powerdnsadmin/static/generated \;
+    cp -r /build/static_orig/generated /build/powerdnsadmin/static && \
+    cp -r /build/static_orig/assets /build/powerdnsadmin/static && \
+    cp -r /build/static_orig/img /build/powerdnsadmin/static && \
+    find /build/static_orig/node_modules -name 'webfonts' -exec cp -r {} /build/powerdnsadmin/static \; && \
+    find /build/static_orig/node_modules -name 'fonts' -exec cp -r {} /build/powerdnsadmin/static \; && \
+    find /build/static_orig/node_modules/icheck/skins/square -name '*.png' -exec cp {} /build/powerdnsadmin/static/generated \; && \
+    rm -rf /build/static_orig
 
-RUN { \
-      echo "from flask_assets import Environment"; \
-      echo "assets = Environment()"; \
-      echo "assets.register('js_login', 'generated/login.js')"; \
-      echo "assets.register('js_validation', 'generated/validation.js')"; \
-      echo "assets.register('css_login', 'generated/login.css')"; \
-      echo "assets.register('js_main', 'generated/main.js')"; \
-      echo "assets.register('css_main', 'generated/main.css')"; \
-    } > /build/powerdnsadmin/assets.py
+COPY docker/assets.py /build/powerdnsadmin/assets.py
 
 # Move application
 RUN mkdir -p /app && \
@@ -101,7 +98,8 @@ RUN apk add --no-cache \
         libldap \
         libsasl \
         xmlsec \
-        tzdata && \
+        tzdata \
+        util-linux && \
     addgroup -S ${USER} && \
     adduser -S -D -G ${USER} ${USER} && \
     mkdir /data && \

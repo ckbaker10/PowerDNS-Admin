@@ -42,6 +42,15 @@ def fetch_remote(remote_url,
     if headers is not None:
         our_headers.update(headers)
 
+    # Use a (connect_timeout, read_timeout) tuple so a silent backend
+    # failure (SSH tunnel gone, firewall drop) is detected within
+    # CONNECT_TIMEOUT seconds instead of blocking for the full read
+    # timeout. A short connect timeout does not affect legitimate slow
+    # reads (e.g. large zone exports) because the read window stays wide.
+    _CONNECT_TIMEOUT = 5
+    if isinstance(timeout, (int, float)):
+        timeout = (_CONNECT_TIMEOUT, timeout)
+
     r = requests.request(method,
                          remote_url,
                          headers=headers,

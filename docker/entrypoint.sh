@@ -5,10 +5,11 @@ cd /app
 GUNICORN_TIMEOUT="${GUNICORN_TIMEOUT:-120}"
 GUNICORN_WORKERS="${GUNICORN_WORKERS:-4}"
 GUNICORN_LOGLEVEL="${GUNICORN_LOGLEVEL:-info}"
+GUNICORN_KEEP_ALIVE="${GUNICORN_KEEP_ALIVE:-2}"
 BIND_ADDRESS="${BIND_ADDRESS:-0.0.0.0:8080}"
 RUN_MIGRATIONS="${RUN_MIGRATIONS:-1}"
 
-GUNICORN_ARGS="-t ${GUNICORN_TIMEOUT} --workers ${GUNICORN_WORKERS} --bind ${BIND_ADDRESS} --log-level ${GUNICORN_LOGLEVEL}"
+GUNICORN_ARGS="-t ${GUNICORN_TIMEOUT} --workers ${GUNICORN_WORKERS} --bind ${BIND_ADDRESS} --log-level ${GUNICORN_LOGLEVEL} --keep-alive ${GUNICORN_KEEP_ALIVE}"
 if [ "$1" = gunicorn ]; then
     if [ "${RUN_MIGRATIONS}" = "1" ] || [ "${RUN_MIGRATIONS}" = "true" ]; then
         # Serialise schema upgrades across replicas. /data is a per-deployment
