@@ -74,7 +74,7 @@ class ApiKey(db.Model):
               role = Role.query.filter(Role.name == role_name).first()
               self.role_id = role.id
 
-          if description:
+          if description is not None:
               self.description = description
 
           if domains is not None:

@@ -33,6 +33,21 @@
 {% block content %}
     <section class="content">
         <div class="container-fluid">
+            {% with errors = get_flashed_messages(category_filter=["error"]) %}
+            {% if errors %}
+            <div class="row">
+                <div class="col-12">
+                    <div class="alert alert-danger alert-dismissible">
+                        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+                        <h4><i class="fa-solid fa-ban"></i> Error saving API key</h4>
+                        <ul class="mb-0">
+                            {%- for msg in errors %}<li>{{ msg }}</li>{%- endfor %}
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+            {% endwith %}
             <div class="row">
                 <div class="col-12 col-sm-6 col-lg-4">
                     <form role="form" method="post" action="{{ form_action }}">
@@ -128,9 +143,16 @@
                                     </thead>
                                     <tbody>
                                     {% if key and key.rrset_acls %}
+                                        {% set acl_zones = key.domains %}
                                         {% for acl in key.rrset_acls %}
                                         <tr>
-                                            <td><input class="form-control form-control-sm" name="rrset_acl_zone[]" value="{{ acl.domain.name if acl.domain else '' }}"></td>
+                                            <td>
+                                                <select class="form-control form-control-sm" name="rrset_acl_zone[]">
+                                                    {% for d in acl_zones %}
+                                                        <option value="{{ d.name }}" {% if acl.domain and acl.domain.name == d.name %}selected{% endif %}>{{ d.name }}</option>
+                                                    {% endfor %}
+                                                </select>
+                                            </td>
                                             <td><input class="form-control form-control-sm" name="rrset_acl_name[]" value="{{ acl.record_name_pattern }}"></td>
                                             <td><input class="form-control form-control-sm" name="rrset_acl_type[]" value="{{ acl.record_type }}" style="width:6em"></td>
                                             <td><select class="form-control form-control-sm" name="rrset_acl_replace[]" style="width:5em"><option value="1" {% if acl.allow_replace %}selected{% endif %}>yes</option><option value="0" {% if not acl.allow_replace %}selected{% endif %}>no</option></select></td>
@@ -162,7 +184,6 @@
                     </form>
                 </div>
                 <!-- /.col -->
-
                 <div class="col-12 col-sm-6 col-lg-8">
                     <div class="card card-outline card-secondary shadow">
                         <div class="card-header">
@@ -315,6 +336,19 @@
             }
         });
         // ---- rrset acl row management ----
+        // Zones allowed for this key (populated server-side).
+        var rrsetAclZones = {{ (key.domains | map(attribute='name') | list if key else []) | tojson }};
+
+        function buildZoneSelect(selectedZone) {
+            var $sel = $('<select class="form-control form-control-sm" name="rrset_acl_zone[]"></select>');
+            $.each(rrsetAclZones, function (_, z) {
+                var $opt = $('<option></option>').val(z).text(z);
+                if (z === selectedZone) { $opt.prop('selected', true); }
+                $sel.append($opt);
+            });
+            return $sel;
+        }
+
         function addRrsetAclRow(zone, name, type, rep, del) {
             zone = zone || '';
             name = name || '';
@@ -323,7 +357,7 @@
             del = (del === undefined) ? '1' : (del ? '1' : '0');
             var $tr = $(
                 '<tr>' +
-                '<td><input class="form-control form-control-sm" name="rrset_acl_zone[]"></td>' +
+                '<td class="td-zone"></td>' +
                 '<td><input class="form-control form-control-sm" name="rrset_acl_name[]"></td>' +
                 '<td><input class="form-control form-control-sm" name="rrset_acl_type[]" style="width:6em"></td>' +
                 '<td><select class="form-control form-control-sm" name="rrset_acl_replace[]" style="width:5em"><option value="1">yes</option><option value="0">no</option></select></td>' +
@@ -331,13 +365,26 @@
                 '<td><button type="button" class="btn btn-sm btn-danger rrset_acl_remove">&times;</button></td>' +
                 '</tr>'
             );
-            $tr.find('input[name="rrset_acl_zone[]"]').val(zone);
+            $tr.find('.td-zone').append(buildZoneSelect(zone));
             $tr.find('input[name="rrset_acl_name[]"]').val(name);
             $tr.find('input[name="rrset_acl_type[]"]').val(type);
             $tr.find('select[name="rrset_acl_replace[]"]').val(rep);
             $tr.find('select[name="rrset_acl_delete[]"]').val(del);
             $('#rrset_acl_table tbody').append($tr);
         }
+
+        // When the zone multi-select changes, rebuild the rrset_acl zone
+        // dropdowns so they always reflect the currently selected zones.
+        $('#key_multi_domain').on('change', function () {
+            rrsetAclZones = $('#key_multi_domain option:selected').map(function () {
+                return $(this).val();
+            }).get();
+            $('#rrset_acl_table tbody tr').each(function () {
+                var $td = $(this).find('.td-zone');
+                var current = $td.find('select').val();
+                $td.empty().append(buildZoneSelect(current));
+            });
+        });
         $('#rrset_acl_add').on('click', function () { addRrsetAclRow(); });
         $('#rrset_acl_table').on('click', '.rrset_acl_remove', function () {
             $(this).closest('tr').remove();

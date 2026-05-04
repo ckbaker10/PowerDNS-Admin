@@ -355,6 +355,15 @@ def _persist_rrset_acl(apikey, rows):
                 raise ValueError(
                     'rrset_acl zone {0!r} is not in the api key zones'
                     .format(zone))
+            # Auto-qualify relative names: if the user typed just the
+            # host part (e.g. ``_acme-challenge.host``) without the zone
+            # suffix (``steep.de``), append the zone so the stored pattern
+            # is always a fully-qualified name.  Trailing dots are
+            # normalised away by _normalise() inside pattern_within_zone.
+            if name and not pattern_within_zone(name, zone):
+                qualified = name.rstrip('.') + '.' + zone
+                if pattern_within_zone(qualified, zone):
+                    name = qualified
             ok, reason = validate_pattern_syntax(name)
             if not ok:
                 raise ValueError(
@@ -470,6 +479,7 @@ def edit_key(key_id=None):
         # Persist rrset_acl rows. For non-User roles the zone access
         # selectors are hidden by the UI; record-scoped ACLs only make
         # sense for User-role keys, so silently ignore them otherwise.
+        rrset_acl_error = None
         try:
             if role == "User":
                 _persist_rrset_acl(apikey, rrset_acl_rows_raw)
@@ -478,7 +488,19 @@ def edit_key(key_id=None):
                     'Ignoring rrset_acl rows on non-User key {0}'.format(apikey.id))
         except ValueError as ve:
             current_app.logger.error('rrset_acl input error: {0}'.format(ve))
-            flash(str(ve), 'error')
+            rrset_acl_error = str(ve)
+            flash(rrset_acl_error, 'error')
+
+        if rrset_acl_error:
+            # Re-render the form so the user sees the error and can correct
+            # the ACL rows without losing the rest of their changes.
+            return render_template('admin_edit_key.html',
+                                   key=apikey,
+                                   domains=domains,
+                                   accounts=accounts,
+                                   roles=roles,
+                                   create=create,
+                                   plain_key=plain_key)
 
         history = History(msg=history_message,
                           detail=json.dumps({

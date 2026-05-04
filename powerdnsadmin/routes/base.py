@@ -6,6 +6,7 @@ from flask_seasurf import SeaSurf
 from flask_session_captcha import FlaskSessionCaptcha
 
 from ..models.user import User
+from ..models.base import db
 
 
 captcha = FlaskSessionCaptcha()
@@ -31,6 +32,14 @@ def handle_page_not_found(e):
 
 
 def handle_internal_server_error(e):
+    # Roll back any dirty session state from the failed request so that
+    # the autoflush triggered by template context processors (e.g.
+    # inject_sitename calling Setting().get()) doesn't re-raise the
+    # original exception and mask the real 500 page.
+    try:
+        db.session.rollback()
+    except Exception:
+        pass
     return render_template('errors/500.html', code=500, message=e), 500
 
 
